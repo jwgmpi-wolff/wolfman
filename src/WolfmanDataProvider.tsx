@@ -3,13 +3,31 @@ import { WolfmanDataContext } from './wolfmanDataContext'
 import type { WolfmanData, Transaction } from './domain'
 import { seedData } from './seed'
 
-const STORAGE_KEY = 'wolfman:data:v1'
+const STORAGE_KEY = 'wolfman:data:v2'
+const PREVIOUS_STORAGE_KEY = 'wolfman:data:v1'
 const LEGACY_STORAGE_KEY = 'openjarvis:data:v1'
+
+const sampleIds = new Set(['t1', 't2', 't3', 't4', 't5', 'g1', 'g2', 'k1', 'k2', 'k3', 'h1', 'h2', 'h3'])
+
+function removeSampleData(data: WolfmanData): WolfmanData {
+  return {
+    ...data,
+    monthlyIncome: data.monthlyIncome === 7200 ? 0 : data.monthlyIncome,
+    hourlyWage: data.hourlyWage === 46 ? 0 : data.hourlyWage,
+    transactions: data.transactions.filter((item) => !sampleIds.has(item.id)),
+    budgets: data.budgets.filter((item) => !['Needs', 'Wants', 'Savings'].includes(item.category)),
+    goals: data.goals.filter((item) => !sampleIds.has(item.id)),
+    tasks: data.tasks.filter((item) => !sampleIds.has(item.id)),
+    habits: data.habits.filter((item) => !sampleIds.has(item.id)),
+  }
+}
 
 function readData(): WolfmanData {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
-    return saved ? (JSON.parse(saved) as WolfmanData) : seedData
+    const current = localStorage.getItem(STORAGE_KEY)
+    if (current) return JSON.parse(current) as WolfmanData
+    const previous = localStorage.getItem(PREVIOUS_STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
+    return previous ? removeSampleData(JSON.parse(previous) as WolfmanData) : seedData
   } catch {
     return seedData
   }

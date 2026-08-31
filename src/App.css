@@ -93,6 +93,9 @@ p { color: var(--muted); line-height: 1.55; }
 .modal input, .modal select { width: 100%; height: 42px; padding: 0 11px; border: 1px solid #cfd5cf; border-radius: 4px; background: #fbfcfa; color: var(--ink); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .cloud-modal form { display: grid; gap: 16px; }
+.connection-section { display: grid; gap: 10px; }
+.connection-section + .connection-section { padding-top: 16px; border-top: 1px solid var(--line); }
+.connection-section h3 { margin: 0; font: 600 15px/1.2 Georgia, 'Times New Roman', serif; }
 .notice { padding: 14px; display: grid; grid-template-columns: 24px 1fr; gap: 10px; align-items: start; border: 1px solid #d8dfd9; border-radius: 5px; background: #f6f8f5; color: var(--amber); }
 .notice.connected { color: var(--green); background: var(--green-soft); border-color: #cfddd2; }
 .notice strong { display: block; color: var(--ink); font-size: 12px; }
@@ -128,12 +131,10 @@ p { color: var(--muted); line-height: 1.55; }
 .message ul, .message ol { margin: 8px 0; padding-left: 21px; }
 .message table { width: 100%; margin: 10px 0; border-collapse: collapse; font-size: 11px; }
 .message th, .message td { padding: 7px; border-bottom: 1px solid var(--line); text-align: left; }
-.prompt-row { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 12px; scrollbar-width: none; }
-.prompt-row::-webkit-scrollbar { display: none; }
-.prompt-row button { min-height: 34px; padding: 0 11px; flex: none; border: 1px solid #cbd4cd; border-radius: 5px; background: #f8faf7; color: var(--green); font-size: 10px; font-weight: 700; cursor: pointer; }
 .composer { min-height: 58px; padding: 7px 8px 7px 16px; display: flex; align-items: center; gap: 10px; border: 1px solid #bdc8c0; border-radius: 7px; background: white; box-shadow: 0 8px 25px rgba(31,48,36,.08); }
 .composer input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 13px; }
 .send-button { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border: 0; border-radius: 5px; background: var(--green); color: white; cursor: pointer; }
+.send-button:disabled { opacity: .55; cursor: wait; }
 .disclaimer { margin: 8px 0 0; text-align: center; font-size: 9px; }
 .voice-button { min-height: 36px; margin-left: auto; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #c8d0c9; border-radius: 5px; background: white; color: var(--muted); font-size: 10px; font-weight: 700; cursor: pointer; }
 .voice-button.enabled { color: var(--green); border-color: #8eae98; background: #f5faf6; }
