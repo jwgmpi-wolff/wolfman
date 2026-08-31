@@ -17,6 +17,7 @@ type SpeechRecognition = {
   continuous: boolean
   interimResults: boolean
   lang: string
+  processLocally?: boolean
   onresult: ((event: RecognitionEvent) => void) | null
   onerror: ((event: RecognitionErrorEvent) => void) | null
   onend: (() => void) | null
@@ -24,7 +25,18 @@ type SpeechRecognition = {
   stop: () => void
 }
 
-type SpeechRecognitionConstructor = new () => SpeechRecognition
+type SpeechRecognitionAvailability = 'available' | 'downloadable' | 'downloading' | 'unavailable'
+
+type SpeechRecognitionOptions = {
+  langs: string[]
+  processLocally: boolean
+}
+
+type SpeechRecognitionConstructor = {
+  new (): SpeechRecognition
+  available?: (options: SpeechRecognitionOptions) => Promise<SpeechRecognitionAvailability>
+  install?: (options: SpeechRecognitionOptions) => Promise<boolean>
+}
 
 declare global {
   interface Window {
@@ -61,6 +73,7 @@ export function useWakeWord(onCommand: (command: string) => void) {
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const enabledRef = useRef(false)
   const commandRef = useRef(onCommand)
+  const embeddedBrowser = /Electron|Code\//i.test(navigator.userAgent)
   const [enabled, setEnabled] = useState(false)
   const [listening, setListening] = useState(false)
   const [status, setStatus] = useState('Voice is off')
@@ -72,7 +85,7 @@ export function useWakeWord(onCommand: (command: string) => void) {
 
   useEffect(() => () => recognitionRef.current?.stop(), [])
 
-  const startRecognition = () => {
+  const startRecognition = async () => {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!Recognition) {
       setStatus('Voice recognition is not supported in this browser')
@@ -103,6 +116,13 @@ export function useWakeWord(onCommand: (command: string) => void) {
           enabledRef.current = false
           setEnabled(false)
           setStatus('Microphone permission is required')
+        } else if (event.error === 'network') {
+          enabledRef.current = false
+          setEnabled(false)
+          setListening(false)
+          setStatus(embeddedBrowser
+            ? 'Voice needs Chrome or Edge, not the embedded browser'
+            : 'Speech service is unavailable. Check your connection and try again')
         } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
           setStatus(`Voice error: ${event.error}`)
         }
@@ -118,8 +138,38 @@ export function useWakeWord(onCommand: (command: string) => void) {
       recognitionRef.current = recognition
     }
 
+    const recognition = recognitionRef.current
+    if (Recognition.available && Recognition.install && 'processLocally' in recognition) {
+      setStatus('Checking on-device voice recognition')
+      try {
+        const availability = await Promise.race([
+          Recognition.available({ langs: ['en-US'], processLocally: true }),
+          new Promise<SpeechRecognitionAvailability>((resolve) =>
+            window.setTimeout(() => resolve('unavailable'), 5000)),
+        ])
+        if (availability === 'available') {
+          recognition.processLocally = true
+        } else if (availability === 'downloadable' || availability === 'downloading') {
+          setStatus('Preparing on-device voice recognition')
+          recognition.processLocally = await Promise.race([
+            Recognition.install({ langs: ['en-US'], processLocally: true }),
+            new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 60000)),
+          ])
+        } else if (embeddedBrowser) {
+          enabledRef.current = false
+          setEnabled(false)
+          setStatus('Voice needs Chrome or Edge, not the embedded browser')
+          return
+        }
+      } catch {
+        recognition.processLocally = false
+      }
+    }
+
+    if (!enabledRef.current) return
+
     try {
-      recognitionRef.current.start()
+      recognition.start()
       setListening(true)
       setStatus('Listening for “Wolfman”')
     } catch {
