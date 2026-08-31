@@ -2,14 +2,15 @@ import { useEffect, useState, type FormEvent } from 'react'
 import {
   ArrowDownRight, ArrowUpRight, Bot, CalendarDays, Check, CheckCircle2,
   ChevronRight, CircleDollarSign, Cloud, Command, Droplets, Dumbbell, Home,
-  ListTodo, Menu, MessageSquareText, Plus, Send, Settings, Sparkles, Target,
+  ListTodo, Menu, MessageSquareText, Mic, MicOff, Plus, Send, Settings, Sparkles, Target,
   TrendingUp, WalletCards, X,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
-import { respondAsJarvis } from './assistant'
+import { respondAsWolfman } from './assistant'
 import { cloudEnabled, getSession, onSessionChange, requestMagicLink, restoreData, signOut, uploadData } from './cloud'
 import type { ChatMessage } from './domain'
-import { useJarvisData } from './jarvisDataContext'
+import { useWolfmanData } from './wolfmanDataContext'
+import { speak, useWakeWord } from './voice'
 import './App.css'
 
 type View = 'overview' | 'money' | 'planner' | 'assistant'
@@ -19,7 +20,7 @@ const navItems: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'overview', label: 'Overview', icon: Home },
   { id: 'money', label: 'Money', icon: WalletCards },
   { id: 'planner', label: 'Planner', icon: ListTodo },
-  { id: 'assistant', label: 'Ask Jarvis', icon: MessageSquareText },
+  { id: 'assistant', label: 'Ask Wolfman', icon: MessageSquareText },
 ]
 
 function Progress({ value, tone = 'green' }: { value: number; tone?: 'green' | 'amber' | 'blue' }) {
@@ -27,7 +28,7 @@ function Progress({ value, tone = 'green' }: { value: number; tone?: 'green' | '
 }
 
 function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
-  const { data, toggleTask, incrementHabit } = useJarvisData()
+  const { data, toggleTask, incrementHabit } = useWolfmanData()
   const totalSpent = data.transactions.reduce((total, item) => total + item.amount, 0)
   const saved = data.transactions.filter((item) => item.category === 'Savings').reduce((total, item) => total + item.amount, 0)
   const spendingBudget = data.budgets.reduce((total, budget) => total + budget.limit, 0)
@@ -71,7 +72,7 @@ function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
 }
 
 function MoneyView() {
-  const { data, addTransaction } = useJarvisData()
+  const { data, addTransaction } = useWolfmanData()
   const [showForm, setShowForm] = useState(false)
   const submitTransaction = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -93,27 +94,30 @@ function MoneyView() {
 }
 
 function PlannerView() {
-  const { data, toggleTask, incrementHabit } = useJarvisData()
+  const { data, toggleTask, incrementHabit } = useWolfmanData()
   const quadrants = ['Do now', 'Schedule', 'Delegate', 'Eliminate'] as const
   return <div className="view"><header className="page-heading compact"><div><p className="eyebrow">Eisenhower matrix</p><h1>Planner</h1><p>Put attention where it creates leverage.</p></div></header><section className="matrix">{quadrants.map((quadrant) => <div className="matrix-column" key={quadrant}><div className="matrix-heading"><h2>{quadrant}</h2><span>{data.tasks.filter((task) => task.quadrant === quadrant).length}</span></div>{data.tasks.filter((task) => task.quadrant === quadrant).map((task) => <button key={task.id} className={`matrix-task ${task.completed ? 'done' : ''}`} onClick={() => toggleTask(task.id)}><span className="check-circle">{task.completed && <Check size={14} />}</span><span><strong>{task.title}</strong><small>{task.due}</small></span></button>)}{!data.tasks.some((task) => task.quadrant === quadrant) && <p className="empty-state">Nothing here. Keep it that way.</p>}</div>)}</section><section className="panel weekly-habits"><div className="panel-heading"><div><p className="eyebrow">Accountability</p><h2>Weekly habits</h2></div></div>{data.habits.map((habit) => <button key={habit.id} className="habit-line" onClick={() => incrementHabit(habit.id)}><span>{habit.name}</span><Progress value={(habit.completedDays / habit.targetDays) * 100} tone="green" /><strong>{habit.completedDays}/{habit.targetDays}</strong></button>)}</section></div>
 }
 
 function AssistantView() {
-  const { data } = useJarvisData()
+  const { data } = useWolfmanData()
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([{ id: 'welcome', role: 'assistant', content: 'Your finances and priorities are in view. What should we analyze?' }])
   const prompts = ['Daily Briefing', 'Weekly Review', 'I want to buy a $900 laptop']
-  const send = (text: string) => {
+  const send = (text: string, spoken = false) => {
     const value = text.trim()
     if (!value) return
-    setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', content: value }, { id: crypto.randomUUID(), role: 'assistant', content: respondAsJarvis(value, data) }])
+    const response = respondAsWolfman(value, data)
+    setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', content: value }, { id: crypto.randomUUID(), role: 'assistant', content: response }])
+    if (spoken) speak(response)
     setInput('')
   }
-  return <div className="view assistant-view"><header className="assistant-heading"><span className="jarvis-orb"><Bot size={22} /></span><div><h1>Jarvis</h1><p><span className="online-dot" /> Ready to analyze</p></div></header><div className="chat-thread">{messages.map((message) => <div key={message.id} className={`message ${message.role}`}><ReactMarkdown>{message.content}</ReactMarkdown></div>)}</div><div className="prompt-row">{prompts.map((prompt) => <button key={prompt} onClick={() => send(prompt)}>{prompt}</button>)}</div><form className="composer" onSubmit={(event) => { event.preventDefault(); send(input) }}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask about money, priorities, or a decision..." aria-label="Message Jarvis" /><button className="send-button" type="submit" title="Send"><Send size={18} /></button></form><p className="disclaimer">Jarvis provides educational analysis, not professional financial advice.</p></div>
+  const voice = useWakeWord((command) => send(command, true))
+  return <div className="view assistant-view"><header className="assistant-heading"><span className={`wolfman-orb ${voice.listening ? 'listening' : ''}`}><Bot size={22} /></span><div><h1>Wolfman</h1><p><span className="online-dot" /> {voice.enabled ? voice.status : 'Ready to analyze'}</p></div><button className={`voice-button ${voice.enabled ? 'enabled' : ''}`} onClick={voice.toggle} disabled={!voice.supported} aria-pressed={voice.enabled} title={voice.supported ? 'Toggle Wolfman voice activation' : 'Voice recognition is unavailable'}>{voice.enabled ? <Mic size={18} /> : <MicOff size={18} />}<span>{voice.enabled ? 'Voice on' : 'Voice off'}</span></button></header><div className="chat-thread">{messages.map((message) => <div key={message.id} className={`message ${message.role}`}><ReactMarkdown>{message.content}</ReactMarkdown></div>)}</div><div className="prompt-row">{prompts.map((prompt) => <button key={prompt} onClick={() => send(prompt)}>{prompt}</button>)}</div><form className="composer" onSubmit={(event) => { event.preventDefault(); send(input) }}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask about money, priorities, or a decision..." aria-label="Message Wolfman" /><button className="send-button" type="submit" title="Send"><Send size={18} /></button></form><p className="disclaimer">Wolfman provides educational analysis, not professional financial advice.</p></div>
 }
 
 function CloudSettings({ onClose }: { onClose: () => void }) {
-  const { data, setData } = useJarvisData()
+  const { data, setData } = useWolfmanData()
   const [email, setEmail] = useState('')
   const [sessionEmail, setSessionEmail] = useState<string | null>(null)
   const [status, setStatus] = useState('')
@@ -139,7 +143,7 @@ function App() {
   const [cloudOpen, setCloudOpen] = useState(false)
   const activeLabel = navItems.find((item) => item.id === view)?.label
   const navigate = (next: View) => { setView(next); setMenuOpen(false) }
-  return <div className="app-shell"><aside className={`sidebar ${menuOpen ? 'open' : ''}`}><div className="brand"><span className="brand-mark">J</span><span>JARVIS</span></div><nav>{navItems.map((item) => { const Icon = item.icon; return <button className={view === item.id ? 'active' : ''} key={item.id} onClick={() => navigate(item.id)}><Icon size={19} /><span>{item.label}</span></button> })}</nav><div className="sidebar-footer"><button className="sync-state" onClick={() => setCloudOpen(true)}><Cloud size={17} /><span><strong>Local vault</strong><small>{cloudEnabled ? 'Cloud available' : 'Cloud ready'}</small></span></button><button className="profile-button" title="Settings" onClick={() => setCloudOpen(true)}><span>JW</span><span><strong>Jerry Wolff</strong><small>Personal workspace</small></span><Settings size={16} /></button></div></aside>{menuOpen && <button className="scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}<main><div className="mobile-header"><button className="icon-button" onClick={() => setMenuOpen(true)}><Menu size={20} /></button><strong>{activeLabel}</strong><button className="brand-mark small" onClick={() => setCloudOpen(true)}>J</button></div>{view === 'overview' && <Overview onNavigate={navigate} />}{view === 'money' && <MoneyView />}{view === 'planner' && <PlannerView />}{view === 'assistant' && <AssistantView />}</main><nav className="bottom-nav">{navItems.map((item) => { const Icon = item.icon; return <button className={view === item.id ? 'active' : ''} key={item.id} onClick={() => navigate(item.id)}><Icon size={20} /><span>{item.label}</span></button> })}</nav>{cloudOpen && <CloudSettings onClose={() => setCloudOpen(false)} />}</div>
+  return <div className="app-shell"><aside className={`sidebar ${menuOpen ? 'open' : ''}`}><div className="brand"><span className="brand-mark">W</span><span>WOLFMAN</span></div><nav>{navItems.map((item) => { const Icon = item.icon; return <button className={view === item.id ? 'active' : ''} key={item.id} onClick={() => navigate(item.id)}><Icon size={19} /><span>{item.label}</span></button> })}</nav><div className="sidebar-footer"><button className="sync-state" onClick={() => setCloudOpen(true)}><Cloud size={17} /><span><strong>Local vault</strong><small>{cloudEnabled ? 'Cloud available' : 'Cloud ready'}</small></span></button><button className="profile-button" title="Settings" onClick={() => setCloudOpen(true)}><span>JW</span><span><strong>Jerry Wolff</strong><small>Personal workspace</small></span><Settings size={16} /></button></div></aside>{menuOpen && <button className="scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}<main><div className="mobile-header"><button className="icon-button" onClick={() => setMenuOpen(true)}><Menu size={20} /></button><strong>{activeLabel}</strong><button className="brand-mark small" onClick={() => setCloudOpen(true)}>W</button></div>{view === 'overview' && <Overview onNavigate={navigate} />}{view === 'money' && <MoneyView />}{view === 'planner' && <PlannerView />}{view === 'assistant' && <AssistantView />}</main><nav className="bottom-nav">{navItems.map((item) => { const Icon = item.icon; return <button className={view === item.id ? 'active' : ''} key={item.id} onClick={() => navigate(item.id)}><Icon size={20} /><span>{item.label}</span></button> })}</nav>{cloudOpen && <CloudSettings onClose={() => setCloudOpen(false)} />}</div>
 }
 
 export default App

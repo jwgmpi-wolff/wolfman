@@ -117,7 +117,9 @@ p { color: var(--muted); line-height: 1.55; }
 .assistant-heading { display: flex; gap: 12px; align-items: center; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
 .assistant-heading h1 { margin: 0; font-size: 24px; }
 .assistant-heading p { margin: 3px 0 0; font-size: 10px; }
-.jarvis-orb { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--green); box-shadow: 0 0 0 5px var(--green-soft); }
+.wolfman-orb { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--green); box-shadow: 0 0 0 5px var(--green-soft); }
+.wolfman-orb.listening { animation: voice-pulse 1.5s ease-in-out infinite; }
+@keyframes voice-pulse { 50% { box-shadow: 0 0 0 10px rgba(56,162,104,.12); } }
 .chat-thread { flex: 1; padding: 26px 0; display: flex; flex-direction: column; gap: 16px; }
 .message { max-width: 84%; padding: 13px 16px; border: 1px solid var(--line); border-radius: 7px; background: white; font-size: 13px; line-height: 1.55; }
 .message.user { margin-left: auto; color: white; background: #2c4f3d; border-color: #2c4f3d; }
@@ -133,6 +135,9 @@ p { color: var(--muted); line-height: 1.55; }
 .composer input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 13px; }
 .send-button { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border: 0; border-radius: 5px; background: var(--green); color: white; cursor: pointer; }
 .disclaimer { margin: 8px 0 0; text-align: center; font-size: 9px; }
+.voice-button { min-height: 36px; margin-left: auto; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #c8d0c9; border-radius: 5px; background: white; color: var(--muted); font-size: 10px; font-weight: 700; cursor: pointer; }
+.voice-button.enabled { color: var(--green); border-color: #8eae98; background: #f5faf6; }
+.voice-button:disabled { opacity: .58; cursor: not-allowed; }
 .mobile-header, .bottom-nav, .scrim { display: none; }
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: 1fr; }

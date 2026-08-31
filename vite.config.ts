@@ -8,18 +8,18 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['jarvis-icon.svg'],
+      includeAssets: ['wolfman-icon.svg'],
       manifest: {
-        name: 'Jarvis Financial & Personal Assistant',
-        short_name: 'Jarvis',
+        name: 'Wolfman Financial & Personal Assistant',
+        short_name: 'Wolfman',
         description: 'A private, analytical command center for money, goals, tasks, and habits.',
         theme_color: '#244d39',
         background_color: '#f1f3ee',
         display: 'standalone',
         start_url: '.',
         icons: [
-          { src: 'jarvis-icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
-          { src: 'jarvis-icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },
+          { src: 'wolfman-icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+          { src: 'wolfman-icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },
         ],
       },
     }),

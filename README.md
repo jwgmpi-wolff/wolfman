@@ -1,4 +1,4 @@
-# Jarvis
+# Wolfman
 
 An installable, local-first financial and personal assistant for Windows, Android, and modern browsers.
 
@@ -10,7 +10,7 @@ An installable, local-first financial and personal assistant for Windows, Androi
 - Offline-capable Progressive Web App (PWA)
 - Optional passwordless, account-isolated cloud backup through Supabase
 
-Jarvis provides educational analysis and is not a substitute for professional financial advice.
+Wolfman provides educational analysis and is not a substitute for professional financial advice.
 
 ## Run locally
 

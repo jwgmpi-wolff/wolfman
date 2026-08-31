@@ -1,4 +1,4 @@
-import type { JarvisData } from './domain'
+import type { WolfmanData } from './domain'
 
 const today = new Date()
 const isoDate = (offset: number) => {
@@ -7,7 +7,7 @@ const isoDate = (offset: number) => {
   return date.toISOString().slice(0, 10)
 }
 
-export const seedData: JarvisData = {
+export const seedData: WolfmanData = {
   monthlyIncome: 7200,
   hourlyWage: 46,
   transactions: [

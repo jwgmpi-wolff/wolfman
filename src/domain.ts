@@ -34,7 +34,7 @@ export type Habit = {
   targetDays: number
 }
 
-export type JarvisData = {
+export type WolfmanData = {
   monthlyIncome: number
   hourlyWage: number
   transactions: Transaction[]

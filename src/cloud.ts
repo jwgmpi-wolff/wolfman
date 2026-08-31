@@ -1,5 +1,5 @@
 import { createClient, type Session } from '@supabase/supabase-js'
-import type { JarvisData } from './domain'
+import type { WolfmanData } from './domain'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const publicKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -35,11 +35,11 @@ export async function signOut() {
   if (error) throw error
 }
 
-export async function uploadData(data: JarvisData) {
+export async function uploadData(data: WolfmanData) {
   if (!client) throw new Error('Cloud sync is not configured.')
   const { data: userData, error: userError } = await client.auth.getUser()
   if (userError || !userData.user) throw userError ?? new Error('Sign in before syncing.')
-  const { error } = await client.from('jarvis_profiles').upsert({
+  const { error } = await client.from('wolfman_profiles').upsert({
     user_id: userData.user.id,
     payload: data,
     updated_at: new Date().toISOString(),
@@ -52,11 +52,11 @@ export async function restoreData() {
   const { data: userData, error: userError } = await client.auth.getUser()
   if (userError || !userData.user) throw userError ?? new Error('Sign in before syncing.')
   const { data, error } = await client
-    .from('jarvis_profiles')
+    .from('wolfman_profiles')
     .select('payload')
     .eq('user_id', userData.user.id)
     .maybeSingle()
   if (error) throw error
   if (!data) throw new Error('No cloud backup exists yet.')
-  return data.payload as JarvisData
+  return data.payload as WolfmanData
 }

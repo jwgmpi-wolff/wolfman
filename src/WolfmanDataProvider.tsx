@@ -1,21 +1,22 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { JarvisDataContext } from './jarvisDataContext'
-import type { JarvisData, Transaction } from './domain'
+import { WolfmanDataContext } from './wolfmanDataContext'
+import type { WolfmanData, Transaction } from './domain'
 import { seedData } from './seed'
 
-const STORAGE_KEY = 'openjarvis:data:v1'
+const STORAGE_KEY = 'wolfman:data:v1'
+const LEGACY_STORAGE_KEY = 'openjarvis:data:v1'
 
-function readData(): JarvisData {
+function readData(): WolfmanData {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    return saved ? (JSON.parse(saved) as JarvisData) : seedData
+    const saved = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
+    return saved ? (JSON.parse(saved) as WolfmanData) : seedData
   } catch {
     return seedData
   }
 }
 
-function useJarvisDataState() {
-  const [data, setData] = useState<JarvisData>(readData)
+function useWolfmanDataState() {
+  const [data, setData] = useState<WolfmanData>(readData)
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
@@ -51,7 +52,7 @@ function useJarvisDataState() {
   return { data, setData, addTransaction, toggleTask, incrementHabit }
 }
 
-export function JarvisDataProvider({ children }: { children: ReactNode }) {
-  const value = useJarvisDataState()
-  return <JarvisDataContext.Provider value={value}>{children}</JarvisDataContext.Provider>
+export function WolfmanDataProvider({ children }: { children: ReactNode }) {
+  const value = useWolfmanDataState()
+  return <WolfmanDataContext.Provider value={value}>{children}</WolfmanDataContext.Provider>
 }
