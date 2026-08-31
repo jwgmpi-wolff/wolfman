@@ -33,8 +33,8 @@ declare global {
   }
 }
 
-export function extractJarvisCommand(transcript: string) {
-  const match = transcript.trim().match(/(?:^|\s)jarvis[,.]?\s*(.*)$/i)
+export function extractWolfmanCommand(transcript: string) {
+  const match = transcript.trim().match(/(?:^|\s)wolfman[,.]?\s*(.*)$/i)
   return match?.[1]?.trim() ?? null
 }
 
@@ -87,9 +87,9 @@ export function useWakeWord(onCommand: (command: string) => void) {
       recognition.onresult = (event) => {
         for (const result of Array.from(event.results)) {
           if (!result.isFinal) continue
-          const command = extractJarvisCommand(result[0].transcript)
+          const command = extractWolfmanCommand(result[0].transcript)
           if (command === null) {
-            setStatus('Say “Jarvis” followed by a request')
+            setStatus('Say “Wolfman” followed by a request')
           } else if (!command) {
             setStatus('I’m listening. What do you need?')
           } else {
@@ -121,7 +121,7 @@ export function useWakeWord(onCommand: (command: string) => void) {
     try {
       recognitionRef.current.start()
       setListening(true)
-      setStatus('Listening for “Jarvis”')
+      setStatus('Listening for “Wolfman”')
     } catch {
       setStatus('Voice is already listening')
     }
