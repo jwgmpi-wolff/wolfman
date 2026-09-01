@@ -129,6 +129,47 @@ function smsSendProxy(): Plugin {
 
 // Dev-only same-origin relay for Yahoo Finance quotes: browsers cannot call it directly (no CORS header),
 // but a same-process server-side fetch is not subject to that restriction. Not available in the static build.
+function stockAnalysisProxyFetchQuote(symbol: string) {
+  const finnhubKey = process.env.FINNHUB_API_KEY
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5000)
+  const request = finnhubKey
+    ? fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${finnhubKey}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return { symbol, error: `Provider returned ${response.status}` }
+        const body = await response.json() as { c?: number; pc?: number; dp?: number; t?: number }
+        if (!body.c) return { symbol, error: 'No quote available' }
+        return {
+          symbol,
+          name: symbol,
+          price: body.c,
+          previousClose: body.pc,
+          changePercent: body.dp ?? null,
+          currency: 'USD',
+          asOf: body.t ? new Date(body.t * 1000).toISOString() : null,
+        }
+      })
+    : fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) return { symbol, error: `Provider returned ${response.status}` }
+      const body = await response.json() as { chart?: { result?: Array<{ meta?: Record<string, unknown> }> } }
+      const meta = body.chart?.result?.[0]?.meta
+      if (!meta?.regularMarketPrice) return { symbol, error: 'No quote available' }
+      return {
+        symbol,
+        name: meta.shortName ?? symbol,
+        price: meta.regularMarketPrice,
+        previousClose: meta.previousClose ?? meta.chartPreviousClose,
+        changePercent: meta.regularMarketChangePercent ?? null,
+        currency: meta.currency ?? 'USD',
+        asOf: meta.regularMarketTime ? new Date((meta.regularMarketTime as number) * 1000).toISOString() : null,
+      }
+    })
+  return request.catch(() => ({ symbol, error: 'Request failed or timed out' })).finally(() => clearTimeout(timeout))
+}
+
 function stockQuoteProxy(): Plugin {
   return {
     name: 'wolfman-stock-quote-proxy',
@@ -139,31 +180,7 @@ function stockQuoteProxy(): Plugin {
           .split(',')
           .map((symbol) => symbol.trim().toUpperCase())
           .filter((symbol) => SYMBOL.test(symbol))
-        const quotes = await Promise.all(symbols.map(async (symbol) => {
-          try {
-            const controller = new AbortController()
-            const timeout = setTimeout(() => controller.abort(), 5000)
-            const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
-              headers: { 'User-Agent': 'Mozilla/5.0' },
-              signal: controller.signal,
-            }).finally(() => clearTimeout(timeout))
-            if (!response.ok) return { symbol, error: `Provider returned ${response.status}` }
-            const body = await response.json() as { chart?: { result?: Array<{ meta?: Record<string, unknown> }> } }
-            const meta = body.chart?.result?.[0]?.meta
-            if (!meta?.regularMarketPrice) return { symbol, error: 'No quote available' }
-            return {
-              symbol,
-              name: meta.shortName ?? symbol,
-              price: meta.regularMarketPrice,
-              previousClose: meta.previousClose ?? meta.chartPreviousClose,
-              changePercent: meta.regularMarketChangePercent ?? null,
-              currency: meta.currency ?? 'USD',
-              asOf: meta.regularMarketTime ? new Date((meta.regularMarketTime as number) * 1000).toISOString() : null,
-            }
-          } catch {
-            return { symbol, error: 'Request failed or timed out' }
-          }
-        }))
+        const quotes = await Promise.all(symbols.map(stockAnalysisProxyFetchQuote))
         res.setHeader('Content-Type', 'application/json')
         res.setHeader('Cache-Control', 'no-store')
         res.end(JSON.stringify({ quotes }))
@@ -177,6 +194,7 @@ function stockAnalysisSma(closes: number[], period: number) {
   const slice = closes.slice(-period)
   return slice.reduce((sum, value) => sum + value, 0) / period
 }
+
 
 function stockAnalysisRsi(closes: number[], period = 14) {
   if (closes.length < period + 1) return null
@@ -269,7 +287,7 @@ export default defineConfig(({ mode }) => {
   // loadEnv with an empty prefix reads every var in .env.local, including server-side-only ones
   // (no VITE_ prefix) that Vite would otherwise never populate onto process.env for this config file.
   const env = loadEnv(mode, process.cwd(), '')
-  for (const key of ['ACS_SMS_CONNECTION_STRING', 'ACS_SMS_FROM_NUMBER', 'AZURE_MAPS_KEY']) {
+  for (const key of ['ACS_SMS_CONNECTION_STRING', 'ACS_SMS_FROM_NUMBER', 'AZURE_MAPS_KEY', 'FINNHUB_API_KEY']) {
     if (env[key]) process.env[key] = env[key]
   }
 

@@ -20,6 +20,9 @@
     "azureMapsKey": {
       "value": "${AZURE_MAPS_KEY}"
     },
+    "finnhubApiKey": {
+      "value": "${FINNHUB_API_KEY}"
+    },
     "acsSmsConnectionString": {
       "value": "${ACS_SMS_CONNECTION_STRING}"
     },

@@ -67,6 +67,10 @@ param corsAllowedOrigins array = []
 param azureMapsKey string = ''
 
 @secure()
+@description('Finnhub API key for real-time stock quotes. Empty falls back to the unlicensed Yahoo Finance source.')
+param finnhubApiKey string = ''
+
+@secure()
 @description('Azure Communication Services SMS connection string. Empty disables that feature.')
 param acsSmsConnectionString string = ''
 
@@ -142,6 +146,7 @@ module api './app/api.bicep' = {
       ACS_SMS_CONNECTION_STRING: acsSmsConnectionString
       ACS_SMS_FROM_NUMBER: acsSmsFromNumber
       WOLFMAN_API_KEY: wolfmanApiKey
+      FINNHUB_API_KEY: finnhubApiKey
     }
     virtualNetworkSubnetId: vnetEnabled ? serviceVirtualNetwork.outputs.appSubnetID : ''
   }
