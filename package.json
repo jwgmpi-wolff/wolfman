@@ -3,12 +3,33 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron": "electron .",
+    "dist:windows": "npm run build && electron-builder --win"
+  },
+  "build": {
+    "appId": "org.wolffentp.wolfman",
+    "productName": "Wolfman",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@azure/communication-sms": "^1.2.0-beta.4",
@@ -28,6 +49,8 @@
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
     "@vitest/coverage-v8": "^4.1.11",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
     "jsdom": "^30.0.1",
     "oxlint": "^1.79.0",
     "typescript": "~6.0.2",

@@ -1,4 +1,6 @@
 // Symbols read from the connected Stock Movement Analyzer app's watchlist on this device.
+import { apiUrl } from './apiClient'
+
 export const importedWatchlist = ['MSFT', 'AAPL', 'NVDA']
 
 type StockQuote = {
@@ -23,7 +25,7 @@ export async function fetchStockPerformance(symbols: string[] = importedWatchlis
   if (!symbols.length) return 'No stock watchlist is available. Add symbols to check performance for.'
   let response: Response
   try {
-    response = await fetch(`/api/stocks/quote?symbols=${encodeURIComponent(symbols.join(','))}`)
+    response = await fetch(apiUrl(`/api/stocks/quote?symbols=${encodeURIComponent(symbols.join(','))}`))
   } catch {
     return 'Live stock data is unavailable. This feature requires the local development proxy or a deployed market-data endpoint.'
   }

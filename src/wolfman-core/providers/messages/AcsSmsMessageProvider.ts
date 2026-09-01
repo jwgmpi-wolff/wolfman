@@ -1,5 +1,6 @@
 import { requestConfirmation } from '../../services/ConfirmationService'
 import { recordAudit } from '../../services/AuditService'
+import { apiUrl, apiKeyHeader } from '../../../apiClient'
 import type { MessageProvider } from './MessageProvider'
 
 const E164 = /^\+[1-9]\d{7,14}$/
@@ -16,9 +17,9 @@ export const smsProvider: MessageProvider = {
 async function sendSms(to: string, body: string) {
   let response: Response
   try {
-    response = await fetch('/api/messages/sms/send', {
+    response = await fetch(apiUrl('/api/messages/sms/send'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...apiKeyHeader },
       body: JSON.stringify({ to, body }),
     })
   } catch {

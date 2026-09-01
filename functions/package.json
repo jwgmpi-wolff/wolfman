@@ -1,0 +1,24 @@
+{
+  "name": "wolfman-api",
+  "version": "1.0.0",
+  "description": "Cloud backend for Wolfman: stock quotes, places search, web search, and SMS send. Lets the client run independently of any local dev proxy.",
+  "main": "dist/src/{index.js,functions/*.js}",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "clean": "rimraf dist",
+    "prestart": "npm run clean && npm run build",
+    "start": "func start",
+    "test": "echo \"No tests yet...\""
+  },
+  "dependencies": {
+    "@azure/communication-sms": "^1.2.0-beta.4",
+    "@azure/functions": "^4.11.0"
+  },
+  "devDependencies": {
+    "azure-functions-core-tools": "^4.x",
+    "@types/node": "^22.x",
+    "typescript": "^5.0.0",
+    "rimraf": "^5.0.0"
+  }
+}

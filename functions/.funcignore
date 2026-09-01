@@ -1,0 +1,6 @@
+.funcignore
+.gitignore
+.vscode
+node_modules
+dist
+local.settings.json

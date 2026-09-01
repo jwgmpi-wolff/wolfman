@@ -13,6 +13,23 @@ dist-ssr
 *.local
 .env
 .env.*
+
+# Android build outputs (regenerated via `npx cap sync android` + Gradle)
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/capacitor-cordova-android-plugins/build/
+*.iml
+.idea/
+
+# Electron-builder raw output (unpacked app, blockmaps). The final installer
+# lives in the curated releases/ folder instead, which is not ignored.
+release/
+
+# azd local environment state (never committed; secrets live only here locally)
+functions/.azure/
+
 !.env.example
 
 # Editor directories and files

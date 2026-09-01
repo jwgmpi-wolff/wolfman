@@ -1,3 +1,5 @@
+import { apiUrl } from './apiClient'
+
 function getCurrentPosition(): Promise<GeolocationPosition | null> {
   if (!('geolocation' in navigator)) return Promise.resolve(null)
   return new Promise((resolve) => {
@@ -20,7 +22,7 @@ async function searchPlaces(query: string) {
   }
   let response: Response
   try {
-    response = await fetch(`/api/places/search?${params}`)
+    response = await fetch(apiUrl(`/api/places/search?${params}`))
   } catch {
     return 'Local business search is unavailable. This feature requires the local development proxy or a deployed places-search endpoint.'
   }
@@ -41,7 +43,7 @@ async function searchPlaces(query: string) {
 async function searchWeb(query: string) {
   let response: Response
   try {
-    response = await fetch(`/api/web/search?q=${encodeURIComponent(query)}`)
+    response = await fetch(apiUrl(`/api/web/search?q=${encodeURIComponent(query)}`))
   } catch {
     return 'Web search is unavailable. This feature requires the local development proxy or a deployed search endpoint.'
   }
