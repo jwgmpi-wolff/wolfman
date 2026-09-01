@@ -6,6 +6,7 @@ export type WolfmanDataContextValue = {
   setData: Dispatch<SetStateAction<WolfmanData>>
   addTransaction: (transaction: Omit<Transaction, 'id'>) => void
   addTask: (task: Omit<Task, 'id' | 'completed'>) => void
+  importTransactions: (transactions: Omit<Transaction, 'id'>[]) => void
   toggleTask: (id: string) => void
   incrementHabit: (id: string) => void
 }

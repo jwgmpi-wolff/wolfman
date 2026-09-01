@@ -1,14 +1,15 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import {
   ArrowDownRight, ArrowUpRight, Bot, CalendarDays, Check, CheckCircle2,
   ChevronRight, CircleDollarSign, Cloud, Command, Droplets, Dumbbell, Home,
   ListTodo, Menu, MessageSquareText, Mic, MicOff, Plus, Send, Settings, Sparkles, Target,
-  TrendingUp, WalletCards, X,
+  TrendingUp, Upload, WalletCards, X,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { respondAsWolfman } from './assistant'
 import { cloudEnabled, getSession, onSessionChange, requestMagicLink, restoreData, signOut, uploadData } from './cloud'
 import type { ChatMessage, Task } from './domain'
+import { parseTransactionsFile } from './fileImport'
 import { connectMicrosoft, disconnectMicrosoft, getMicrosoftAccount, microsoftEnabled } from './microsoft'
 import { useWolfmanData } from './wolfmanDataContext'
 import { speak, useWakeWord } from './voice'
@@ -76,8 +77,10 @@ function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
 }
 
 function MoneyView() {
-  const { data, addTransaction } = useWolfmanData()
+  const { data, addTransaction, importTransactions } = useWolfmanData()
   const [showForm, setShowForm] = useState(false)
+  const [importStatus, setImportStatus] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const submitTransaction = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
@@ -85,9 +88,23 @@ function MoneyView() {
     event.currentTarget.reset()
     setShowForm(false)
   }
+  const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    try {
+      const transactions = await parseTransactionsFile(file)
+      if (!transactions.length) { setImportStatus('No transactions were found in that file.'); return }
+      importTransactions(transactions)
+      setImportStatus(`Imported ${transactions.length} transaction${transactions.length === 1 ? '' : 's'} from ${file.name}.`)
+    } catch (error) {
+      setImportStatus(error instanceof Error ? error.message : 'That file could not be imported.')
+    }
+  }
   return (
     <div className="view">
-      <header className="page-heading compact"><div><p className="eyebrow">Financial command center</p><h1>Money</h1><p>Track every dollar. Keep the plan honest.</p></div><button className="primary-button" onClick={() => setShowForm(true)}><Plus size={17} /> Add transaction</button></header>
+      <header className="page-heading compact"><div><p className="eyebrow">Financial command center</p><h1>Money</h1><p>Track every dollar. Keep the plan honest.</p></div><div className="header-actions"><input ref={fileInputRef} type="file" accept=".csv,.json" hidden onChange={(event) => void handleFile(event)} /><button className="secondary-button" onClick={() => fileInputRef.current?.click()}><Upload size={17} /> Import file</button><button className="primary-button" onClick={() => setShowForm(true)}><Plus size={17} /> Add transaction</button></div></header>
+      {importStatus && <p className="import-status">{importStatus}</p>}
       <div className="money-layout">
         <section className="panel transaction-panel"><div className="panel-heading"><h2>Recent activity</h2><span className="status"><span /> Up to date</span></div><div className="transaction-list">{data.transactions.map((transaction) => <div className="transaction-row" key={transaction.id}><span className="merchant-mark">{transaction.merchant.slice(0, 1)}</span><span><strong>{transaction.merchant}</strong><small>{transaction.date} · {transaction.category}</small></span><strong className={transaction.category === 'Savings' ? 'positive' : ''}>{transaction.category === 'Savings' ? '+' : '−'}{money.format(transaction.amount)}</strong></div>)}</div></section>
         <aside className="panel framework-panel"><p className="eyebrow">Your framework</p><h2>Budget plan</h2>{data.budgets.map((budget) => <div className="split-row" key={budget.category}><span>{budget.category}</span><strong>{data.monthlyIncome ? Math.round((budget.limit / data.monthlyIncome) * 100) : 0}%</strong></div>)}{!data.budgets.length && <p>No budgets yet.</p>}</aside>

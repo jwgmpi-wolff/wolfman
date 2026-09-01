@@ -55,6 +55,13 @@ function useWolfmanDataState() {
     }))
   }
 
+  const importTransactions = (transactions: Omit<Transaction, 'id'>[]) => {
+    setData((current) => ({
+      ...current,
+      transactions: [...transactions.map((transaction) => ({ ...transaction, id: crypto.randomUUID() })), ...current.transactions],
+    }))
+  }
+
   const toggleTask = (id: string) => {
     setData((current) => ({
       ...current,
@@ -75,7 +82,7 @@ function useWolfmanDataState() {
     }))
   }
 
-  return { data, setData, addTransaction, addTask, toggleTask, incrementHabit }
+  return { data, setData, addTransaction, addTask, importTransactions, toggleTask, incrementHabit }
 }
 
 export function WolfmanDataProvider({ children }: { children: ReactNode }) {
