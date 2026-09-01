@@ -2,7 +2,7 @@ import { PublicClientApplication, type AccountInfo } from '@azure/msal-browser'
 
 const clientId = import.meta.env.VITE_MICROSOFT_CLIENT_ID
 const tenantId = import.meta.env.VITE_MICROSOFT_TENANT_ID || 'common'
-const scopes = ['User.Read', 'Mail.Read', 'Chat.Read', 'Files.Read.All']
+const scopes = ['User.Read', 'Mail.Read', 'Chat.Read', 'Files.Read.All', 'Calendars.Read']
 const graphRoot = 'https://graph.microsoft.com/v1.0'
 
 export const microsoftEnabled = Boolean(clientId)
@@ -120,11 +120,30 @@ async function readProfile() {
   return `**Microsoft account**\n\n- Name: ${escapeMarkdown(profile.displayName)}\n- Account: ${escapeMarkdown(profile.mail || profile.userPrincipalName)}`
 }
 
+async function readCalendar() {
+  const now = new Date()
+  const end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+  const result = await graph<GraphList<{ subject?: string; start?: { dateTime?: string }; end?: { dateTime?: string }; location?: { displayName?: string }; isAllDay?: boolean }>>(
+    `/me/calendarview?startDateTime=${now.toISOString()}&endDateTime=${end.toISOString()}&$select=subject,start,end,location,isAllDay&$orderby=start/dateTime&$top=15`,
+  )
+  if (!result.value.length) return 'No upcoming events in the next 7 days.'
+  return `**Upcoming calendar events (next 7 days)**\n\n${result.value.map((event) => {
+    const when = event.isAllDay
+      ? 'All day'
+      : event.start?.dateTime && event.end?.dateTime
+        ? `${new Date(event.start.dateTime).toLocaleString()} – ${new Date(event.end.dateTime).toLocaleTimeString()}`
+        : 'Time unavailable'
+    const where = event.location?.displayName ? ` · ${escapeMarkdown(event.location.displayName)}` : ''
+    return `- **${escapeMarkdown(event.subject)}** · ${when}${where}`
+  }).join('\n')}`
+}
+
 export async function answerMicrosoftRequest(input: string) {
   const normalized = input.toLowerCase()
   if (/\b(email|mail|inbox|outlook)\b/.test(normalized)) return readMail()
   if (/\b(teams?|chat|message)\b/.test(normalized)) return readChats()
   if (/\b(files?|documents?|onedrive|sharepoint)\b/.test(normalized)) return readFiles()
+  if (/\b(calendar|events?|schedule|meetings?|agenda)\b/.test(normalized)) return readCalendar()
   if (/\b(account|profile|who am i)\b/.test(normalized)) return readProfile()
   return null
 }
