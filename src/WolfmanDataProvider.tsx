@@ -25,7 +25,8 @@ function removeSampleData(data: WolfmanData): WolfmanData {
 function readData(): WolfmanData {
   try {
     const current = localStorage.getItem(STORAGE_KEY)
-    if (current) return JSON.parse(current) as WolfmanData
+    // Filter unconditionally: earlier builds could have already saved sample data under this key.
+    if (current) return removeSampleData(JSON.parse(current) as WolfmanData)
     const previous = localStorage.getItem(PREVIOUS_STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
     return previous ? removeSampleData(JSON.parse(previous) as WolfmanData) : seedData
   } catch {

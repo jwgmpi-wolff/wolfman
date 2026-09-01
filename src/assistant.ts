@@ -1,5 +1,6 @@
 import type { WolfmanData } from './domain'
 import { answerMicrosoftRequest, readRequestedUrl } from './microsoft'
+import { answerStockRequest } from './stocks'
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
 
@@ -45,6 +46,8 @@ function purchaseReview(data: WolfmanData, input: string) {
 }
 
 export async function respondAsWolfman(input: string, data: WolfmanData) {
+  const stockResponse = await answerStockRequest(input)
+  if (stockResponse) return stockResponse
   const microsoftResponse = await answerMicrosoftRequest(input)
   if (microsoftResponse) return microsoftResponse
   const webResponse = await readRequestedUrl(input)
