@@ -1,7 +1,7 @@
 import type { WolfmanData } from './domain'
 import { answerMicrosoftRequest, readRequestedUrl } from './microsoft'
 import { answerStockRequest } from './stocks'
-import { answerInternetRequest } from './internet'
+import { answerInternetRequest, searchWeb } from './internet'
 import { answerMessageRequest } from './messages'
 import { answerTaskRequest } from './tasks'
 
@@ -69,5 +69,5 @@ export async function respondAsWolfman(input: string, data: WolfmanData) {
     if (!data.budgets.length) return 'No local budget records are available.'
     return `**Budget pacing**\n\n${data.budgets.map((budget) => `- **${budget.category}:** ${money.format(spentByCategory(data, budget.category))} of ${money.format(budget.limit)}`).join('\n')}\n\nYour current framework follows 50/30/20 across needs, wants, and savings.`
   }
-  return 'I do not have information for that request. Enter the relevant details, connect a Microsoft account in Settings, or include a public URL for me to read.'
+  return searchWeb(input)
 }

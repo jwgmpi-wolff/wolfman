@@ -40,7 +40,7 @@ async function searchPlaces(query: string) {
   return `**Results for "${query}"${locationNote}**\n\n${rows.join('\n')}`
 }
 
-async function searchWeb(query: string) {
+export async function searchWeb(query: string) {
   let response: Response
   try {
     response = await fetch(apiUrl(`/api/web/search?q=${encodeURIComponent(query)}`))
@@ -55,7 +55,7 @@ async function searchWeb(query: string) {
     heading: string | null; summary: string | null; url: string | null
     related: Array<{ text?: string; url?: string }>
   }
-  if (!body.summary && !body.related.length) return `No summary result found for "${query}". Try a more specific phrase, or provide a direct URL.`
+  if (!body.summary && !body.related.length) return `No summary result found for "${query}".`
   const parts: string[] = []
   if (body.summary) parts.push(`**${body.heading ?? query}**\n\n${body.summary}${body.url ? ` ([source](${body.url}))` : ''}`)
   if (body.related.length) parts.push(`**Related**\n\n${body.related.map((item) => `- ${item.url ? `[${item.text}](${item.url})` : item.text}`).join('\n')}`)
