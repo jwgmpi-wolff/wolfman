@@ -130,10 +130,15 @@ export type ImportResult =
   | { kind: 'transactions'; transactions: Omit<Transaction, 'id'>[] }
   | { kind: 'dataset'; dataset: ImportedDataset }
 
+async function readFileText(file: File) {
+  if (typeof file.text === 'function') return file.text()
+  return new TextDecoder().decode(await file.arrayBuffer())
+}
+
 // Any CSV/JSON schema is accepted: recognized transaction-style files import as transactions,
 // everything else is stored as a generic dataset (arbitrary columns) for analysis.
 export async function parseImportFile(file: File): Promise<ImportResult> {
-  const text = await file.text()
+  const text = await readFileText(file)
   const name = file.name.replace(/\.(csv|json)$/i, '')
   if (file.name.toLowerCase().endsWith('.json')) {
     const parsed = JSON.parse(text) as unknown

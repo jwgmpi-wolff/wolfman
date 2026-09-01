@@ -20,6 +20,17 @@ describe('parseImportFile', () => {
 
     await expect(parseImportFile(file)).rejects.toThrow('array of objects')
   })
+
+  it('falls back to arrayBuffer when File.text is unavailable', async () => {
+    const file = new File(['Name,Value\nWolfman,1'], 'android.csv', { type: 'text/csv' })
+    Object.defineProperty(file, 'text', { value: undefined })
+
+    const result = await parseImportFile(file)
+
+    expect(result.kind).toBe('dataset')
+    if (result.kind !== 'dataset') return
+    expect(result.dataset.rows).toEqual([{ Name: 'Wolfman', Value: '1' }])
+  })
 })
 
 describe('analyzeDataset', () => {

@@ -91,9 +91,10 @@ function MoneyView() {
     setShowForm(false)
   }
   const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
+    const input = event.currentTarget
+    const file = input.files?.[0]
     if (!file) return
+    setImportStatus(`Reading ${file.name}...`)
     try {
       const result = await parseImportFile(file)
       if (result.kind === 'transactions') {
@@ -106,6 +107,8 @@ function MoneyView() {
       }
     } catch (error) {
       setImportStatus(error instanceof Error ? error.message : 'That file could not be imported.')
+    } finally {
+      input.value = ''
     }
   }
   return (
