@@ -40,6 +40,8 @@ async function searchPlaces(query: string) {
   return `**Results for "${query}"${locationNote}**\n\n${rows.join('\n')}`
 }
 
+export { searchPlaces }
+
 export async function searchWeb(query: string) {
   let response: Response
   try {

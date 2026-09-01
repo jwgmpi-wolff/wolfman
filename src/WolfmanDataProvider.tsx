@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { WolfmanDataContext } from './wolfmanDataContext'
-import type { WolfmanData, Transaction, Task } from './domain'
+import type { WolfmanData, Transaction, Task, ImportedDataset } from './domain'
 import { seedData } from './seed'
 
 const STORAGE_KEY = 'wolfman:data:v2'
@@ -19,6 +19,7 @@ function removeSampleData(data: WolfmanData): WolfmanData {
     goals: data.goals.filter((item) => !sampleIds.has(item.id)),
     tasks: data.tasks.filter((item) => !sampleIds.has(item.id)),
     habits: data.habits.filter((item) => !sampleIds.has(item.id)),
+    datasets: data.datasets ?? [],
   }
 }
 
@@ -62,6 +63,13 @@ function useWolfmanDataState() {
     }))
   }
 
+  const importDataset = (dataset: ImportedDataset) => {
+    setData((current) => ({
+      ...current,
+      datasets: [dataset, ...current.datasets],
+    }))
+  }
+
   const toggleTask = (id: string) => {
     setData((current) => ({
       ...current,
@@ -82,7 +90,7 @@ function useWolfmanDataState() {
     }))
   }
 
-  return { data, setData, addTransaction, addTask, importTransactions, toggleTask, incrementHabit }
+  return { data, setData, addTransaction, addTask, importTransactions, importDataset, toggleTask, incrementHabit }
 }
 
 export function WolfmanDataProvider({ children }: { children: ReactNode }) {

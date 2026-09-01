@@ -7,7 +7,9 @@ An installable, local-first financial and personal assistant for Windows, Androi
 - Starts empty: no sample transactions, tasks, goals, or habits
 - 50/30/20 budget pacing and transaction tracking as you enter data
 - Savings goals, Eisenhower task planning, and weekly habits
+- CSV/JSON transaction and dataset imports with local analysis
 - Keyboard or voice requests only — Wolfman never volunteers unprompted suggestions
+- Optional local Ollama agent with tools for finances, datasets, stocks, Microsoft 365, web search, and confirmed SMS
 - Optional consented, read-only Microsoft 365 access (email, Teams chats, files) and public web page reading
 - Offline-capable Progressive Web App (PWA)
 - Optional passwordless, account-isolated cloud backup through Supabase
@@ -25,6 +27,14 @@ npm run dev
 ```
 
 Cloud and Microsoft configuration are both optional. Without them, all data remains in browser local storage and Wolfman answers only from what you type or say, or a public URL you provide.
+
+## Enable the local agent
+
+1. Install [Ollama](https://ollama.com/download).
+2. Pull the default model with `ollama pull llama3.1:8b`.
+3. Optionally set `VITE_OLLAMA_URL` or `VITE_OLLAMA_MODEL` in `.env.local` to use a different Ollama server or installed model.
+
+The Windows desktop app starts the local Ollama server when needed. Browser development requires Ollama to already be running. If Ollama or the configured model is unavailable, Wolfman uses its built-in request handlers instead.
 
 ## Validate
 

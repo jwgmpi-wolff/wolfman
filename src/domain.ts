@@ -34,6 +34,14 @@ export type Habit = {
   targetDays: number
 }
 
+export type ImportedDataset = {
+  id: string
+  name: string
+  importedAt: string
+  columns: string[]
+  rows: Record<string, string>[]
+}
+
 export type WolfmanData = {
   monthlyIncome: number
   hourlyWage: number
@@ -42,6 +50,7 @@ export type WolfmanData = {
   goals: Goal[]
   tasks: Task[]
   habits: Habit[]
+  datasets: ImportedDataset[]
 }
 
 export type ChatMessage = {

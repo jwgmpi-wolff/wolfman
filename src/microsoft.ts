@@ -64,7 +64,7 @@ async function accessToken(account: AccountInfo) {
   }
 }
 
-async function graph<T>(path: string) {
+export async function graph<T>(path: string) {
   const account = await getMicrosoftAccount()
   if (!account) throw new Error('Connect your Microsoft account in Settings first.')
   const response = await fetch(`${graphRoot}${path}`, {

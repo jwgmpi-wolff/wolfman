@@ -8,4 +8,5 @@ export const seedData: WolfmanData = {
   goals: [],
   tasks: [],
   habits: [],
+  datasets: [],
 }

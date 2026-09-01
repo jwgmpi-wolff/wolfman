@@ -1,5 +1,5 @@
 import { createContext, useContext, type Dispatch, type SetStateAction } from 'react'
-import type { WolfmanData, Transaction, Task } from './domain'
+import type { WolfmanData, Transaction, Task, ImportedDataset } from './domain'
 
 export type WolfmanDataContextValue = {
   data: WolfmanData
@@ -7,6 +7,7 @@ export type WolfmanDataContextValue = {
   addTransaction: (transaction: Omit<Transaction, 'id'>) => void
   addTask: (task: Omit<Task, 'id' | 'completed'>) => void
   importTransactions: (transactions: Omit<Transaction, 'id'>[]) => void
+  importDataset: (dataset: ImportedDataset) => void
   toggleTask: (id: string) => void
   incrementHabit: (id: string) => void
 }

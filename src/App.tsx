@@ -7,9 +7,10 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { respondAsWolfman } from './assistant'
+import { isAgentAvailable, respondWithAgent } from './agent'
 import { cloudEnabled, getSession, onSessionChange, requestMagicLink, restoreData, signOut, uploadData } from './cloud'
 import type { ChatMessage, Task } from './domain'
-import { parseTransactionsFile } from './fileImport'
+import { parseImportFile } from './fileImport'
 import { connectMicrosoft, disconnectMicrosoft, getMicrosoftAccount, microsoftEnabled } from './microsoft'
 import { useWolfmanData } from './wolfmanDataContext'
 import { speak, useWakeWord } from './voice'
@@ -77,7 +78,7 @@ function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
 }
 
 function MoneyView() {
-  const { data, addTransaction, importTransactions } = useWolfmanData()
+  const { data, addTransaction, importTransactions, importDataset } = useWolfmanData()
   const [showForm, setShowForm] = useState(false)
   const [importStatus, setImportStatus] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -93,10 +94,15 @@ function MoneyView() {
     event.target.value = ''
     if (!file) return
     try {
-      const transactions = await parseTransactionsFile(file)
-      if (!transactions.length) { setImportStatus('No transactions were found in that file.'); return }
-      importTransactions(transactions)
-      setImportStatus(`Imported ${transactions.length} transaction${transactions.length === 1 ? '' : 's'} from ${file.name}.`)
+      const result = await parseImportFile(file)
+      if (result.kind === 'transactions') {
+        if (!result.transactions.length) { setImportStatus('No transactions were found in that file.'); return }
+        importTransactions(result.transactions)
+        setImportStatus(`Imported ${result.transactions.length} transaction${result.transactions.length === 1 ? '' : 's'} from ${file.name}.`)
+      } else {
+        importDataset(result.dataset)
+        setImportStatus(`Imported "${result.dataset.name}" — ${result.dataset.rows.length} rows, ${result.dataset.columns.length} columns. Ask Wolfman to analyze it.`)
+      }
     } catch (error) {
       setImportStatus(error instanceof Error ? error.message : 'That file could not be imported.')
     }
@@ -140,7 +146,7 @@ function AssistantView() {
     setInput('')
     setBusy(true)
     try {
-      const response = await respondAsWolfman(value, data)
+      const response = (await isAgentAvailable()) ? await respondWithAgent(value, data) : await respondAsWolfman(value, data)
       setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', content: response }])
       if (spoken) speak(response)
     } catch (error) {

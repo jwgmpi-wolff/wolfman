@@ -4,6 +4,7 @@ import { answerStockRequest } from './stocks'
 import { answerInternetRequest, searchWeb } from './internet'
 import { answerMessageRequest } from './messages'
 import { answerTaskRequest } from './tasks'
+import { answerDatasetRequest } from './datasets'
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
 
@@ -51,6 +52,8 @@ function purchaseReview(data: WolfmanData, input: string) {
 export async function respondAsWolfman(input: string, data: WolfmanData) {
   const taskResponse = answerTaskRequest(input, data)
   if (taskResponse) return taskResponse
+  const datasetResponse = answerDatasetRequest(input, data)
+  if (datasetResponse) return datasetResponse
   const messageResponse = await answerMessageRequest(input)
   if (messageResponse) return messageResponse
   const stockResponse = await answerStockRequest(input)

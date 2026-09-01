@@ -1,8 +1,16 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { recordAudit, getAuditLog } from './AuditService'
 
 describe('AuditService', () => {
-  beforeEach(() => localStorage.clear())
+  beforeEach(() => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      clear: () => values.clear(),
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    })
+  })
+  afterEach(() => vi.unstubAllGlobals())
 
   it('records write actions with metadata only, newest first', () => {
     recordAudit({ action: 'send-sms', target: '+15551234567', outcome: 'sent' })
