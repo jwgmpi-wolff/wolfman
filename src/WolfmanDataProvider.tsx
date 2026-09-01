@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { WolfmanDataContext } from './wolfmanDataContext'
-import type { WolfmanData, Transaction } from './domain'
+import type { WolfmanData, Transaction, Task } from './domain'
 import { seedData } from './seed'
 
 const STORAGE_KEY = 'wolfman:data:v2'
@@ -48,6 +48,13 @@ function useWolfmanDataState() {
     }))
   }
 
+  const addTask = (task: Omit<Task, 'id' | 'completed'>) => {
+    setData((current) => ({
+      ...current,
+      tasks: [...current.tasks, { ...task, id: crypto.randomUUID(), completed: false }],
+    }))
+  }
+
   const toggleTask = (id: string) => {
     setData((current) => ({
       ...current,
@@ -68,7 +75,7 @@ function useWolfmanDataState() {
     }))
   }
 
-  return { data, setData, addTransaction, toggleTask, incrementHabit }
+  return { data, setData, addTransaction, addTask, toggleTask, incrementHabit }
 }
 
 export function WolfmanDataProvider({ children }: { children: ReactNode }) {

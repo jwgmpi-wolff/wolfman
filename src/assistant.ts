@@ -1,6 +1,9 @@
 import type { WolfmanData } from './domain'
 import { answerMicrosoftRequest, readRequestedUrl } from './microsoft'
 import { answerStockRequest } from './stocks'
+import { answerInternetRequest } from './internet'
+import { answerMessageRequest } from './messages'
+import { answerTaskRequest } from './tasks'
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
 
@@ -46,12 +49,18 @@ function purchaseReview(data: WolfmanData, input: string) {
 }
 
 export async function respondAsWolfman(input: string, data: WolfmanData) {
+  const taskResponse = answerTaskRequest(input, data)
+  if (taskResponse) return taskResponse
+  const messageResponse = await answerMessageRequest(input)
+  if (messageResponse) return messageResponse
   const stockResponse = await answerStockRequest(input)
   if (stockResponse) return stockResponse
   const microsoftResponse = await answerMicrosoftRequest(input)
   if (microsoftResponse) return microsoftResponse
   const webResponse = await readRequestedUrl(input)
   if (webResponse) return webResponse
+  const internetResponse = await answerInternetRequest(input)
+  if (internetResponse) return internetResponse
   const normalized = input.toLowerCase().trim()
   if (normalized === 'good morning' || normalized.includes('daily briefing')) return dailyBriefing(data)
   if (normalized.includes('weekly review')) return weeklyReview(data)

@@ -8,7 +8,7 @@ import {
 import ReactMarkdown from 'react-markdown'
 import { respondAsWolfman } from './assistant'
 import { cloudEnabled, getSession, onSessionChange, requestMagicLink, restoreData, signOut, uploadData } from './cloud'
-import type { ChatMessage } from './domain'
+import type { ChatMessage, Task } from './domain'
 import { connectMicrosoft, disconnectMicrosoft, getMicrosoftAccount, microsoftEnabled } from './microsoft'
 import { useWolfmanData } from './wolfmanDataContext'
 import { speak, useWakeWord } from './voice'
@@ -98,9 +98,17 @@ function MoneyView() {
 }
 
 function PlannerView() {
-  const { data, toggleTask, incrementHabit } = useWolfmanData()
+  const { data, addTask, toggleTask, incrementHabit } = useWolfmanData()
+  const [showForm, setShowForm] = useState(false)
   const quadrants = ['Do now', 'Schedule', 'Delegate', 'Eliminate'] as const
-  return <div className="view"><header className="page-heading compact"><div><p className="eyebrow">Eisenhower matrix</p><h1>Planner</h1><p>Put attention where it creates leverage.</p></div></header><section className="matrix">{quadrants.map((quadrant) => <div className="matrix-column" key={quadrant}><div className="matrix-heading"><h2>{quadrant}</h2><span>{data.tasks.filter((task) => task.quadrant === quadrant).length}</span></div>{data.tasks.filter((task) => task.quadrant === quadrant).map((task) => <button key={task.id} className={`matrix-task ${task.completed ? 'done' : ''}`} onClick={() => toggleTask(task.id)}><span className="check-circle">{task.completed && <Check size={14} />}</span><span><strong>{task.title}</strong><small>{task.due}</small></span></button>)}{!data.tasks.some((task) => task.quadrant === quadrant) && <p className="empty-state">Nothing here. Keep it that way.</p>}</div>)}</section><section className="panel weekly-habits"><div className="panel-heading"><div><p className="eyebrow">Accountability</p><h2>Weekly habits</h2></div></div>{data.habits.map((habit) => <button key={habit.id} className="habit-line" onClick={() => incrementHabit(habit.id)}><span>{habit.name}</span><Progress value={(habit.completedDays / habit.targetDays) * 100} tone="green" /><strong>{habit.completedDays}/{habit.targetDays}</strong></button>)}</section></div>
+  const submitTask = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    addTask({ title: String(form.get('title')), quadrant: String(form.get('quadrant')) as Task['quadrant'], due: String(form.get('due')) })
+    event.currentTarget.reset()
+    setShowForm(false)
+  }
+  return <div className="view"><header className="page-heading compact"><div><p className="eyebrow">Eisenhower matrix</p><h1>Planner</h1><p>Put attention where it creates leverage.</p></div><button className="primary-button" onClick={() => setShowForm(true)}><Plus size={17} /> Add task</button></header><section className="matrix">{quadrants.map((quadrant) => <div className="matrix-column" key={quadrant}><div className="matrix-heading"><h2>{quadrant}</h2><span>{data.tasks.filter((task) => task.quadrant === quadrant).length}</span></div>{data.tasks.filter((task) => task.quadrant === quadrant).map((task) => <button key={task.id} className={`matrix-task ${task.completed ? 'done' : ''}`} onClick={() => toggleTask(task.id)}><span className="check-circle">{task.completed && <Check size={14} />}</span><span><strong>{task.title}</strong><small>{task.due}</small></span></button>)}{!data.tasks.some((task) => task.quadrant === quadrant) && <p className="empty-state">Nothing here. Keep it that way.</p>}</div>)}</section><section className="panel weekly-habits"><div className="panel-heading"><div><p className="eyebrow">Accountability</p><h2>Weekly habits</h2></div></div>{data.habits.map((habit) => <button key={habit.id} className="habit-line" onClick={() => incrementHabit(habit.id)}><span>{habit.name}</span><Progress value={(habit.completedDays / habit.targetDays) * 100} tone="green" /><strong>{habit.completedDays}/{habit.targetDays}</strong></button>)}</section>{showForm && <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowForm(false)}><form className="modal" onSubmit={submitTask} onMouseDown={(event) => event.stopPropagation()}><div className="panel-heading"><div><p className="eyebrow">New record</p><h2>Add task</h2></div><button type="button" className="icon-button" onClick={() => setShowForm(false)}><X size={18} /></button></div><label>Title<input name="title" required placeholder="What needs to happen?" /></label><div className="form-grid"><label>Quadrant<select name="quadrant">{quadrants.map((quadrant) => <option key={quadrant}>{quadrant}</option>)}</select></label><label>Due<input name="due" required placeholder="Today, 4:00 PM" /></label></div><button className="primary-button full" type="submit">Add task</button></form></div>}</div>
 }
 
 function AssistantView() {
