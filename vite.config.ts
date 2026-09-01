@@ -283,7 +283,7 @@ function stockAnalysisProxy(): Plugin {
   }
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   // loadEnv with an empty prefix reads every var in .env.local, including server-side-only ones
   // (no VITE_ prefix) that Vite would otherwise never populate onto process.env for this config file.
   const env = loadEnv(mode, process.cwd(), '')
@@ -292,7 +292,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    base: process.env.VITE_BASE_PATH || '/',
+    base: process.env.VITE_BASE_PATH || (command === 'build' ? './' : '/'),
     server: {
       fs: {
         deny: [
