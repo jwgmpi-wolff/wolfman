@@ -44,6 +44,46 @@ export async function fetchStockPerformance(symbols: string[] = importedWatchlis
 export function answerStockRequest(input: string) {
   const normalized = input.toLowerCase()
   if (!/\b(stock|stocks|shares|ticker|portfolio|market)\b/.test(normalized)) return null
+  if (/\b(strategy|strategies|analysis|analyze|signal|trend|momentum|buy|sell|should i|technicals?|indicator)\b/.test(normalized)) {
+    return analyzeStockPerformance()
+  }
   if (!/\b(performance|price|prices|check|today|doing|up|down)\b/.test(normalized)) return null
   return fetchStockPerformance()
 }
+
+type StockAnalysis = {
+  symbol: string
+  name?: string
+  price?: number
+  currency?: string
+  sma20?: number | null
+  sma50?: number | null
+  rsi14?: number | null
+  week52Low?: number
+  week52High?: number
+  rangePercent?: number
+  score?: number
+  label?: string
+  reasons?: string[]
+  error?: string
+}
+
+export async function analyzeStockPerformance(symbols: string[] = importedWatchlist) {
+  if (!symbols.length) return 'No stock watchlist is available. Add symbols to analyze.'
+  let response: Response
+  try {
+    response = await fetch(apiUrl(`/api/stocks/analysis?symbols=${encodeURIComponent(symbols.join(','))}`))
+  } catch {
+    return 'Live stock data is unavailable. This feature requires the local development proxy or a deployed market-data endpoint.'
+  }
+  if (!response.ok) return `Stock analysis request failed (${response.status}).`
+  const { results } = (await response.json()) as { results: StockAnalysis[] }
+  const sections = results.map((stock) => {
+    if (stock.error || stock.price === undefined) return `### ${stock.symbol}\n${stock.error ?? 'No data available'}`
+    const price = new Intl.NumberFormat('en-US', { style: 'currency', currency: stock.currency ?? 'USD' }).format(stock.price)
+    const reasons = (stock.reasons ?? []).map((reason) => `- ${reason}`).join('\n')
+    return `### ${stock.symbol} (${stock.name ?? stock.symbol}) — ${stock.label} (score ${stock.score})\n${price} · derived from real 1-year daily price history\n\n${reasons}`
+  })
+  return `**Stock analysis**\n\nBased on real moving averages, RSI, and 52-week range from each symbol's own price history — not a fabricated opinion.\n\n${sections.join('\n\n')}`
+}
+
