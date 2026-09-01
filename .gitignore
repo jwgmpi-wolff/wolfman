@@ -27,6 +27,10 @@ android/capacitor-cordova-android-plugins/build/
 # lives in the curated releases/ folder instead, which is not ignored.
 release/
 
+# The Windows installer exceeds GitHub's 100MB file limit; publish it as a GitHub Release
+# asset instead (see releases/Wolfman-Setup-Windows.exe, built locally via `npm run dist:windows`).
+releases/*.exe
+
 # azd local environment state (never committed; secrets live only here locally)
 functions/.azure/
 
