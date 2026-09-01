@@ -6,11 +6,12 @@ import { smsProvider } from './wolfman-core/providers/messages/AcsSmsMessageProv
 import { confirmAction, cancelAction } from './wolfman-core/services/ConfirmationService'
 import { recordAudit } from './wolfman-core/services/AuditService'
 
-const OLLAMA_URL = import.meta.env.VITE_OLLAMA_URL || 'http://localhost:11434'
+const OLLAMA_URL = import.meta.env.VITE_OLLAMA_URL || (import.meta.env.DEV ? '/api/ollama' : 'http://localhost:11434')
 const OLLAMA_MODEL = import.meta.env.VITE_OLLAMA_MODEL || 'llama3.1:8b'
+const OLLAMA_VISION_MODEL = import.meta.env.VITE_OLLAMA_VISION_MODEL || 'gemma4:26b'
 
 type ToolCall = { id?: string; function: { name: string; arguments: Record<string, unknown> } }
-type ChatMessage = { role: 'system' | 'user' | 'assistant' | 'tool'; content: string; tool_call_id?: string; tool_calls?: ToolCall[] }
+type ChatMessage = { role: 'system' | 'user' | 'assistant' | 'tool'; content: string; images?: string[]; tool_call_id?: string; tool_calls?: ToolCall[] }
 
 const tools = [
   {
@@ -228,6 +229,7 @@ async function executeToolInner(name: string, args: Record<string, unknown>, dat
 
 export async function isAgentAvailable() {
   try {
+    if (window.wolfmanDesktop) return window.wolfmanDesktop.ollamaAvailable()
     const response = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(1500) })
     return response.ok
   } catch {
@@ -235,18 +237,27 @@ export async function isAgentAvailable() {
   }
 }
 
-export async function respondWithAgent(input: string, data: WolfmanData, history: ChatMessage[] = []): Promise<string> {
+export async function respondWithAgent(input: string, data: WolfmanData, history: ChatMessage[] = [], images: string[] = []): Promise<string> {
   const systemPrompt = `You are Wolfman, a private financial and personal assistant. Today is ${new Date().toDateString()}. Always call a tool to get real data before answering \u2014 never fabricate numbers, dates, or facts. When analyzing an imported dataset, call list_datasets first, inspect the real column names and sample values, and only sum columns that are genuinely numeric quantities (never dates, account numbers, or "low - high" range strings). Reply in concise markdown. Never refuse a request \u2014 use search_web or read_url for anything outside your other tools.`
-  const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }, ...history, { role: 'user', content: input }]
+  const systemContent = images.length ? `${systemPrompt} Inspect the attached images directly; they may be still images or representative frames sampled from a video.` : systemPrompt
+  const messages: ChatMessage[] = [{ role: 'system', content: systemContent }, ...history, { role: 'user', content: input, ...(images.length ? { images } : {}) }]
 
   for (let iteration = 0; iteration < 6; iteration++) {
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_MODEL, messages, tools, stream: false }),
-    })
-    if (!response.ok) throw new Error(`Local model request failed (${response.status}).`)
-    const body = await response.json() as { message: ChatMessage }
+    const request = images.length
+      ? { model: OLLAMA_VISION_MODEL, messages, stream: false, think: false, options: { num_predict: 384 } }
+      : { model: OLLAMA_MODEL, messages, tools, stream: false }
+    let body: { message: ChatMessage }
+    if (window.wolfmanDesktop) {
+      body = await window.wolfmanDesktop.ollamaChat(request) as { message: ChatMessage }
+    } else {
+      const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      })
+      if (!response.ok) throw new Error(`Local model request failed (${response.status}).`)
+      body = await response.json() as { message: ChatMessage }
+    }
     const message = body.message
     if (!message.tool_calls?.length) return message.content
 

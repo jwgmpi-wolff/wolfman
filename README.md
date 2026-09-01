@@ -1,6 +1,50 @@
 # Wolfman
 
-An installable, local-first financial and personal assistant for Windows, Android, and modern browsers.
+Wolfman helps with money, tasks, goals, and habits. Your data stays on your device unless you turn on cloud sync.
+
+## Install Wolfman
+
+Pick your device. Do the one step under its name.
+
+### Windows
+
+Copy this whole line. Paste it into PowerShell. Press **Enter**.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/jwgmpi-wolff/wolfman/main/scripts/install-windows.ps1 | iex"
+```
+
+This gets every tool Wolfman needs. It also gets the AI models. The download is about 25 GB. Wolfman opens when it is done.
+
+### Linux
+
+Copy this whole line. Paste it into a terminal. Press **Enter**.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jwgmpi-wolff/wolfman/main/scripts/install-linux.sh | bash
+```
+
+This works on Ubuntu, Debian, Fedora, Arch, and openSUSE. It gets every tool Wolfman needs. It also gets the AI models. The download is about 25 GB. Wolfman opens when it is done.
+
+### Android
+
+[Tap here to get the Android app.](https://raw.githubusercontent.com/jwgmpi-wolff/wolfman/main/releases/Wolfman-debug.apk)
+
+Open the file. Tap **Install**. Your phone may ask you to allow this install.
+
+Android cannot run Wolfman's large local AI models. The rest of the app still works.
+
+### Mac, iPhone, iPad, or Chromebook
+
+[Open Wolfman in your web browser.](https://jwgmpi-wolff.github.io/wolfman/)
+
+Use your browser menu. Pick **Install app** or **Add to Home Screen**.
+
+The web app cannot install the large local AI models for you. The rest of the app still works.
+
+## What the desktop install does
+
+The Windows and Linux commands get Git, Node.js 22, Ollama, Wolfman, and two AI models. They build the app, install it, and open it. Run the same command later to get a new Wolfman version. Your saved Wolfman data is not removed.
 
 ## Features
 
@@ -16,9 +60,9 @@ An installable, local-first financial and personal assistant for Windows, Androi
 
 Wolfman provides educational analysis and is not a substitute for professional financial advice.
 
-## Run locally
+## Build it yourself
 
-Prerequisites: Node.js 22 or newer and npm.
+You need Node.js 22 or newer and npm.
 
 ```powershell
 npm install
@@ -28,13 +72,11 @@ npm run dev
 
 Cloud and Microsoft configuration are both optional. Without them, all data remains in browser local storage and Wolfman answers only from what you type or say, or a public URL you provide.
 
-## Enable the local agent
+## Change the local AI
 
-1. Install [Ollama](https://ollama.com/download).
-2. Pull the default model with `ollama pull llama3.1:8b`.
-3. Optionally set `VITE_OLLAMA_URL` or `VITE_OLLAMA_MODEL` in `.env.local` to use a different Ollama server or installed model.
+The one-step desktop install sets up Ollama for you. To use other models, set `VITE_OLLAMA_URL`, `VITE_OLLAMA_MODEL`, or `VITE_OLLAMA_VISION_MODEL` in `.env.local` before building the app.
 
-The Windows desktop app starts the local Ollama server when needed. Browser development requires Ollama to already be running. If Ollama or the configured model is unavailable, Wolfman uses its built-in request handlers instead.
+The Windows desktop app starts the local Ollama server when needed. Browser development requires Ollama to already be running. Wolfman can inspect pasted or attached images, sample frames from attached videos and direct video-file URLs, and inspect representative thumbnails for YouTube links. Remote hosts must permit browser media access. If Ollama or the configured model is unavailable, Wolfman uses its built-in text request handlers instead.
 
 ## Validate
 
@@ -42,11 +84,6 @@ The Windows desktop app starts the local Ollama server when needed. Browser deve
 npm run lint
 npm run build
 ```
-
-## Install
-
-- **Windows:** Open the deployed site in Edge or Chrome, select the install icon in the address bar, and choose **Install**.
-- **Android:** Open the deployed site in Chrome, open the browser menu, and choose **Install app** or **Add to Home screen**.
 
 ## Enable private cloud sync
 

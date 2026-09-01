@@ -294,6 +294,13 @@ export default defineConfig(({ command, mode }) => {
   return {
     base: process.env.VITE_BASE_PATH || (command === 'build' ? './' : '/'),
     server: {
+      proxy: {
+        '/api/ollama': {
+          target: env.VITE_OLLAMA_URL || 'http://localhost:11434',
+          changeOrigin: true,
+          rewrite: (requestPath) => requestPath.replace(/^\/api\/ollama/, ''),
+        },
+      },
       fs: {
         deny: [
           '.env',

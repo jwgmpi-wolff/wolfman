@@ -57,4 +57,5 @@ export type ChatMessage = {
   id: string
   role: 'assistant' | 'user'
   content: string
+  media?: Array<{ id: string; kind: 'image' | 'video'; name: string; previewUrl: string }>
 }

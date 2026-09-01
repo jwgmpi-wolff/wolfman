@@ -1,9 +1,41 @@
-const { app, BrowserWindow, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, shell } = require('electron')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 
 let ollamaProcess = null
+const MAX_MEDIA_BYTES = 250 * 1024 * 1024
+const OLLAMA_URL = 'http://localhost:11434'
+
+ipcMain.handle('wolfman:ollama-available', () => isOllamaRunning())
+
+ipcMain.handle('wolfman:ollama-chat', async (_event, body) => {
+  if (!body || typeof body !== 'object' || typeof body.model !== 'string' || !Array.isArray(body.messages)) {
+    throw new Error('Invalid local model request.')
+  }
+  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(180000),
+  })
+  if (!response.ok) throw new Error(`Local model request failed (${response.status}).`)
+  return response.json()
+})
+
+ipcMain.handle('wolfman:fetch-media', async (_event, value) => {
+  const url = new URL(String(value))
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Only HTTP(S) media links are supported.')
+  const response = await fetch(url, { signal: AbortSignal.timeout(30000) })
+  if (!response.ok) throw new Error(`Media URL returned HTTP ${response.status}.`)
+  const contentType = response.headers.get('content-type')?.split(';')[0] ?? ''
+  if (!contentType.startsWith('image/') && !contentType.startsWith('video/')) throw new Error('The link did not return an image or video.')
+  const declaredSize = Number(response.headers.get('content-length') ?? 0)
+  if (declaredSize > MAX_MEDIA_BYTES) throw new Error('The linked media is larger than 250 MB.')
+  const bytes = Buffer.from(await response.arrayBuffer())
+  if (bytes.length > MAX_MEDIA_BYTES) throw new Error('The linked media is larger than 250 MB.')
+  return { base64: bytes.toString('base64'), contentType }
+})
 
 function findOllamaExecutable() {
   if (process.platform === 'win32') {
@@ -15,7 +47,7 @@ function findOllamaExecutable() {
 
 async function isOllamaRunning() {
   try {
-    const response = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(1500) })
+    const response = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(1500) })
     return response.ok
   } catch {
     return false
@@ -53,6 +85,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, 'preload.cjs'),
     },
   })
 

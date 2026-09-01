@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'r
 import {
   ArrowDownRight, ArrowUpRight, Bot, CalendarDays, Check, CheckCircle2,
   ChevronRight, CircleDollarSign, Cloud, Command, Droplets, Dumbbell, Home,
-  ListTodo, Menu, MessageSquareText, Mic, MicOff, Plus, Send, Settings, Sparkles, Target,
+  ListTodo, Menu, MessageSquareText, Mic, MicOff, Paperclip, Plus, Send, Settings, Sparkles, Target,
   TrendingUp, Upload, WalletCards, X,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -11,6 +11,7 @@ import { isAgentAvailable, respondWithAgent } from './agent'
 import { cloudEnabled, getSession, onSessionChange, requestMagicLink, restoreData, signOut, uploadData } from './cloud'
 import type { ChatMessage, Task } from './domain'
 import { parseImportFile } from './fileImport'
+import { createMediaDrafts, findMediaUrls, prepareMediaForAgent, type MediaDraft } from './media'
 import { connectMicrosoft, disconnectMicrosoft, getMicrosoftAccount, microsoftEnabled } from './microsoft'
 import { useWolfmanData } from './wolfmanDataContext'
 import { speak, useWakeWord } from './voice'
@@ -138,27 +139,80 @@ function AssistantView() {
   const { data } = useWolfmanData()
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [media, setMedia] = useState<MediaDraft[]>([])
+  const [mediaError, setMediaError] = useState('')
   const [busy, setBusy] = useState(false)
+  const mediaInputRef = useRef<HTMLInputElement>(null)
+  const mediaUrlsRef = useRef(new Set<string>())
+
+  useEffect(() => () => {
+    mediaUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+    mediaUrlsRef.current.clear()
+  }, [])
+
+  const addMedia = (files: File[]) => {
+    const accepted = files.filter((file) => file.type.startsWith('image/') || file.type.startsWith('video/'))
+    const tooLarge = accepted.find((file) => file.size > (file.type.startsWith('video/') ? 250 : 20) * 1024 * 1024)
+    if (tooLarge) { setMediaError(`${tooLarge.name || 'That file'} is too large.`); return }
+    setMediaError('')
+    const drafts = createMediaDrafts(accepted)
+    setMedia((current) => {
+      const available = Math.max(0, 4 - current.length)
+      const added = drafts.slice(0, available)
+      added.forEach((item) => mediaUrlsRef.current.add(item.previewUrl))
+      drafts.slice(available).forEach((item) => URL.revokeObjectURL(item.previewUrl))
+      return [...current, ...added]
+    })
+  }
+
+  const removeMedia = (id: string) => {
+    setMedia((current) => {
+      const removed = current.find((item) => item.id === id)
+      if (removed) {
+        URL.revokeObjectURL(removed.previewUrl)
+        mediaUrlsRef.current.delete(removed.previewUrl)
+      }
+      return current.filter((item) => item.id !== id)
+    })
+  }
+
   const send = async (text: string, spoken = false) => {
     const value = text.trim()
-    if (!value) return
-    setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', content: value }])
+    const currentMedia = media
+    const mediaUrls = findMediaUrls(value)
+    if (!value && !currentMedia.length) return
+    const prompt = value || 'Analyze the attached media.'
+    setMessages((current) => [...current, {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: prompt,
+      media: currentMedia.map(({ id, kind, name, previewUrl }) => ({ id, kind, name, previewUrl })),
+    }])
     setInput('')
+    setMedia([])
+    setMediaError('')
     setBusy(true)
     try {
-      const response = (await isAgentAvailable()) ? await respondWithAgent(value, data) : await respondAsWolfman(value, data)
+      const agentAvailable = await isAgentAvailable()
+      if (!agentAvailable && (currentMedia.length || mediaUrls.length)) throw new Error('Media analysis requires the local Ollama agent. Start Ollama and try again.')
+      let response: string
+      if (agentAvailable) {
+        const prepared = await prepareMediaForAgent(value, currentMedia)
+        const mediaContext = prepared.note ? `${prompt}\n\nAttached media:\n${prepared.note}` : prompt
+        response = await respondWithAgent(mediaContext, data, [], prepared.images)
+      } else {
+        response = await respondAsWolfman(prompt, data)
+      }
       setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', content: response }])
       if (spoken) speak(response)
     } catch (error) {
       const response = error instanceof Error ? error.message : 'The request failed.'
       setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', content: response }])
       if (spoken) speak(response)
-    } finally {
-      setBusy(false)
-    }
+    } finally { setBusy(false) }
   }
   const voice = useWakeWord((command) => void send(command, true))
-  return <div className="view assistant-view"><header className="assistant-heading"><span className={`wolfman-orb ${voice.listening ? 'listening' : ''}`}><Bot size={22} /></span><div><h1>Wolfman</h1><p><span className="online-dot" /> {voice.enabled ? voice.status : busy ? 'Searching, retrieving, and forming a response...' : 'Ready'}</p></div><button className={`voice-button ${voice.enabled ? 'enabled' : ''}`} onClick={voice.toggle} disabled={!voice.supported} aria-pressed={voice.enabled} title={voice.supported ? 'Toggle Wolfman voice activation' : 'Voice recognition is unavailable'}>{voice.enabled ? <Mic size={18} /> : <MicOff size={18} />}<span>{voice.enabled ? 'Voice on' : 'Voice off'}</span></button></header><div className="chat-thread">{messages.map((message) => <div key={message.id} className={`message ${message.role}`}><ReactMarkdown>{message.content}</ReactMarkdown></div>)}{busy && <div className="message assistant thinking" aria-live="polite" aria-label="Wolfman is thinking"><span /><span /><span /></div>}</div><form className="composer" onSubmit={(event) => { event.preventDefault(); void send(input) }}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask about money, priorities, or anything else..." aria-label="Message Wolfman" /><button className="send-button" type="submit" title="Send" disabled={busy}><Send size={18} /></button></form><p className="disclaimer">Wolfman answers from your data, connected accounts, and public sources — no extra input needed.</p></div>
+  return <div className="view assistant-view"><header className="assistant-heading"><span className={`wolfman-orb ${voice.listening ? 'listening' : ''}`}><Bot size={22} /></span><div><h1>Wolfman</h1><p><span className="online-dot" /> {voice.enabled ? voice.status : busy ? 'Inspecting and forming a response...' : 'Ready'}</p></div><button className={`voice-button ${voice.enabled ? 'enabled' : ''}`} onClick={voice.toggle} disabled={!voice.supported} aria-pressed={voice.enabled} title={voice.supported ? 'Toggle Wolfman voice activation' : 'Voice recognition is unavailable'}>{voice.enabled ? <Mic size={18} /> : <MicOff size={18} />}<span>{voice.enabled ? 'Voice on' : 'Voice off'}</span></button></header><div className="chat-thread">{messages.map((message) => <div key={message.id} className={`message ${message.role}`}>{message.media?.length ? <div className="message-media">{message.media.map((item) => item.kind === 'image' ? <img key={item.id} src={item.previewUrl} alt={item.name} /> : <video key={item.id} src={item.previewUrl} aria-label={item.name} controls />)}</div> : null}<ReactMarkdown>{message.content}</ReactMarkdown></div>)}{busy && <div className="message assistant thinking" aria-live="polite" aria-label="Wolfman is thinking"><span /><span /><span /></div>}</div><div className="composer-shell">{media.length ? <div className="media-tray">{media.map((item) => <div className="media-preview" key={item.id}>{item.kind === 'image' ? <img src={item.previewUrl} alt={item.name} /> : <video src={item.previewUrl} aria-label={item.name} muted />}<button type="button" onClick={() => removeMedia(item.id)} title={`Remove ${item.name}`}><X size={14} /></button></div>)}</div> : null}{mediaError && <p className="media-error">{mediaError}</p>}<form className="composer" onSubmit={(event) => { event.preventDefault(); void send(input) }}><input ref={mediaInputRef} className="media-input" type="file" accept="image/*,video/*" multiple onChange={(event) => { addMedia(Array.from(event.target.files ?? [])); event.target.value = '' }} /><button className="attach-button" type="button" title="Attach image or video" onClick={() => mediaInputRef.current?.click()} disabled={busy}><Paperclip size={18} /></button><input value={input} onPaste={(event) => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); addMedia(files) } }} onChange={(event) => setInput(event.target.value)} placeholder="Ask, paste media, or enter an image/video link..." aria-label="Message Wolfman" /><button className="send-button" type="submit" title="Send" disabled={busy || (!input.trim() && !media.length)}><Send size={18} /></button></form></div><p className="disclaimer">Paste an image, attach media, or send a direct image/video URL for private local analysis.</p></div>
 }
 
 function CloudSettings({ onClose }: { onClose: () => void }) {
