@@ -34,9 +34,19 @@ export async function getMicrosoftAccount() {
 
 export async function connectMicrosoft() {
   const app = await initialize()
-  const result = await app.loginPopup({ scopes, prompt: 'select_account' })
-  app.setActiveAccount(result.account)
-  return result.account
+  try {
+    const result = await app.loginPopup({ scopes, prompt: 'select_account' })
+    app.setActiveAccount(result.account)
+    return result.account
+  } catch (error) {
+    // An abandoned/blocked popup can leave MSAL believing an interaction is still running,
+    // which silently blocks every future attempt until this stuck flag is cleared.
+    if (error instanceof Error && error.name === 'BrowserAuthError' && 'errorCode' in error && error.errorCode === 'interaction_in_progress') {
+      sessionStorage.removeItem('msal.interaction.status')
+      throw new Error('The previous sign-in attempt did not complete. Try connecting again.')
+    }
+    throw error
+  }
 }
 
 export async function disconnectMicrosoft() {
