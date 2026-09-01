@@ -14,7 +14,7 @@ const client = microsoftEnabled
         authority: `https://login.microsoftonline.com/${tenantId}`,
         redirectUri: new URL(import.meta.env.BASE_URL, window.location.origin).href,
       },
-      cache: { cacheLocation: 'sessionStorage' },
+      cache: { cacheLocation: 'localStorage' },
     })
   : null
 
@@ -29,7 +29,9 @@ async function initialize() {
 
 export async function getMicrosoftAccount() {
   const app = await initialize()
-  return app.getActiveAccount() ?? app.getAllAccounts()[0] ?? null
+  const account = app.getActiveAccount() ?? app.getAllAccounts()[0] ?? null
+  if (account && !app.getActiveAccount()) app.setActiveAccount(account)
+  return account
 }
 
 export async function connectMicrosoft() {
@@ -43,6 +45,7 @@ export async function connectMicrosoft() {
     // which silently blocks every future attempt until this stuck flag is cleared.
     if (error instanceof Error && error.name === 'BrowserAuthError' && 'errorCode' in error && error.errorCode === 'interaction_in_progress') {
       sessionStorage.removeItem('msal.interaction.status')
+      localStorage.removeItem('msal.interaction.status')
       throw new Error('The previous sign-in attempt did not complete. Try connecting again.')
     }
     throw error
