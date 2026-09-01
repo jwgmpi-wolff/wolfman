@@ -6,7 +6,7 @@ function createWindow() {
     width: 1280,
     height: 800,
     title: 'Wolfman',
-    icon: path.join(__dirname, '../public/wolfman-icon.svg'),
+    icon: path.join(__dirname, `../public/wolfman-icon${process.platform === 'win32' ? '.ico' : '-512.png'}`),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
