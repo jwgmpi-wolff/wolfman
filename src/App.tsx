@@ -9,6 +9,7 @@ import ReactMarkdown from 'react-markdown'
 import { respondAsWolfman } from './assistant'
 import { isAgentAvailable, respondWithAgent } from './agent'
 import { cloudEnabled, getSession, onSessionChange, requestMagicLink, restoreData, signOut, uploadData } from './cloud'
+import { isDatasetRequest } from './datasets'
 import type { ChatMessage, Task } from './domain'
 import { parseImportFile } from './fileImport'
 import { createMediaDrafts, findMediaUrls, prepareMediaForAgent, type MediaDraft } from './media'
@@ -196,15 +197,19 @@ function AssistantView() {
     setMediaError('')
     setBusy(true)
     try {
-      const agentAvailable = await isAgentAvailable()
-      if (!agentAvailable && (currentMedia.length || mediaUrls.length)) throw new Error('Media analysis requires the local Ollama agent. Start Ollama and try again.')
       let response: string
-      if (agentAvailable) {
-        const prepared = await prepareMediaForAgent(value, currentMedia)
-        const mediaContext = prepared.note ? `${prompt}\n\nAttached media:\n${prepared.note}` : prompt
-        response = await respondWithAgent(mediaContext, data, [], prepared.images)
-      } else {
+      if (isDatasetRequest(prompt) && !currentMedia.length && !mediaUrls.length) {
         response = await respondAsWolfman(prompt, data)
+      } else {
+        const agentAvailable = await isAgentAvailable()
+        if (!agentAvailable && (currentMedia.length || mediaUrls.length)) throw new Error('Media analysis requires the local Ollama agent. Start Ollama and try again.')
+        if (agentAvailable) {
+          const prepared = await prepareMediaForAgent(value, currentMedia)
+          const mediaContext = prepared.note ? `${prompt}\n\nAttached media:\n${prepared.note}` : prompt
+          response = await respondWithAgent(mediaContext, data, [], prepared.images)
+        } else {
+          response = await respondAsWolfman(prompt, data)
+        }
       }
       setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', content: response }])
       if (spoken) speak(response)

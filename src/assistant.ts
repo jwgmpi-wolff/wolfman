@@ -52,7 +52,7 @@ function purchaseReview(data: WolfmanData, input: string) {
 export async function respondAsWolfman(input: string, data: WolfmanData) {
   const taskResponse = answerTaskRequest(input, data)
   if (taskResponse) return taskResponse
-  const datasetResponse = answerDatasetRequest(input, data)
+  const datasetResponse = await answerDatasetRequest(input, data)
   if (datasetResponse) return datasetResponse
   const messageResponse = await answerMessageRequest(input)
   if (messageResponse) return messageResponse

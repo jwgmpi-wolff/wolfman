@@ -1,7 +1,4 @@
-// Symbols read from the connected Stock Movement Analyzer app's watchlist on this device.
 import { apiUrl } from './apiClient'
-
-export const importedWatchlist = ['MSFT', 'AAPL', 'NVDA']
 
 type StockQuote = {
   symbol: string
@@ -21,7 +18,7 @@ function formatPrice(quote: StockQuote) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: quote.currency ?? 'USD' }).format(quote.price)
 }
 
-export async function fetchStockPerformance(symbols: string[] = importedWatchlist) {
+export async function fetchStockPerformance(symbols: string[] = []) {
   if (!symbols.length) return 'No stock watchlist is available. Add symbols to check performance for.'
   let response: Response
   try {
@@ -68,16 +65,21 @@ type StockAnalysis = {
   error?: string
 }
 
-export async function analyzeStockPerformance(symbols: string[] = importedWatchlist) {
+export async function analyzeStockPerformance(symbols: string[] = []) {
   if (!symbols.length) return 'No stock watchlist is available. Add symbols to analyze.'
-  let response: Response
-  try {
-    response = await fetch(apiUrl(`/api/stocks/analysis?symbols=${encodeURIComponent(symbols.join(','))}`))
-  } catch {
-    return 'Live stock data is unavailable. This feature requires the local development proxy or a deployed market-data endpoint.'
+  const results: StockAnalysis[] = []
+  for (let index = 0; index < symbols.length; index += 25) {
+    const batch = symbols.slice(index, index + 25)
+    let response: Response
+    try {
+      response = await fetch(apiUrl(`/api/stocks/analysis?symbols=${encodeURIComponent(batch.join(','))}`))
+    } catch {
+      return 'Live stock data is unavailable. This feature requires the local development proxy or a deployed market-data endpoint.'
+    }
+    if (!response.ok) return `Stock analysis request failed (${response.status}).`
+    const body = (await response.json()) as { results: StockAnalysis[] }
+    results.push(...body.results)
   }
-  if (!response.ok) return `Stock analysis request failed (${response.status}).`
-  const { results } = (await response.json()) as { results: StockAnalysis[] }
   const sections = results.map((stock) => {
     if (stock.error || stock.price === undefined) return `### ${stock.symbol}\n${stock.error ?? 'No data available'}`
     const price = new Intl.NumberFormat('en-US', { style: 'currency', currency: stock.currency ?? 'USD' }).format(stock.price)
