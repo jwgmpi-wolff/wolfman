@@ -1,6 +1,8 @@
 package com.wolfman.app
 
+import android.app.AlertDialog
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -117,6 +119,7 @@ class MainActivity : AppCompatActivity() {
         val speakButton = Button(this).apply { text = "\uD83C\uDFA4 Speak" }
         speakRepliesToggle = CheckBox(this).apply { text = "Speak replies aloud"; isChecked = true }
         azureSignInButton = Button(this).apply { text = "Sign in to Azure" }
+        val teachButton = Button(this).apply { text = "\uD83D\uDCDA Teach Wolfman" }
         assistantButtons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         responseView = TextView(this).apply {
             text = "Not asked yet."
@@ -127,6 +130,7 @@ class MainActivity : AppCompatActivity() {
         askButton.setOnClickListener { ask() }
         speakButton.setOnClickListener { listenForQuestion() }
         azureSignInButton.setOnClickListener { signInToAzure() }
+        teachButton.setOnClickListener { promptTeachWolfman() }
 
         root.addView(statusView)
         root.addView(questionInput)
@@ -134,6 +138,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(speakButton)
         root.addView(speakRepliesToggle)
         root.addView(azureSignInButton)
+        root.addView(teachButton)
         root.addView(assistantButtons)
         root.addView(responseView)
 
@@ -520,41 +525,79 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Live, keyless public web search — no cloud SDK, no API key. Same source
-     * DuckDuckGo Instant Answer API as the desktop core's `internet.ts`. This
-     * is Wolfman's own fallback for finding a real answer when no model
-     * runtime or daemon could, before ever suggesting an assistant handoff.
+     * Real, live web search — DuckDuckGo's HTML result page (organic results),
+     * not the weak Instant-Answer API, which only ever matched curated topic
+     * summaries and missed most real questions. If a learned source exists for
+     * a similar past question (see `teachWolfman`), that site is tried first
+     * — Wolfman remembers WHERE an answer was found before, never the answer
+     * itself, so the result here is always fetched live.
      */
     private fun searchWeb(query: String): String? {
+        val learnedDomain = findLearnedSource(query)
+        if (learnedDomain != null) {
+            val scoped = runCatching { htmlSearch("site:$learnedDomain $query") }.getOrNull()
+            if (scoped != null) return scoped
+        }
+        return htmlSearch(query) ?: throw java.io.IOException("no live web results for this query")
+    }
+
+    private fun htmlSearch(query: String): String? {
         val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-        val url = "https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1&skip_disambig=1"
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        val connection = (URL("https://html.duckduckgo.com/html/?q=$encoded").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 6_000
             readTimeout = 8_000
+            setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; WolfmanBot/1.0)")
         }
         if (connection.responseCode !in 200..299) throw java.io.IOException("HTTP ${connection.responseCode}")
 
-        val raw = connection.inputStream.bufferedReader().use { it.readText() }
-        val json = JSONObject(raw)
-        val heading = json.optString("Heading").ifBlank { null }
-        val abstractText = json.optString("AbstractText").ifBlank { null }
-        val abstractUrl = json.optString("AbstractURL").ifBlank { null }
+        val html = connection.inputStream.bufferedReader().use { it.readText() }
+        val re = Regex("""class="result__a"[^>]*>([\s\S]*?)</a>[\s\S]*?class="result__snippet"[^>]*>([\s\S]*?)</a>""")
+        val results = re.findAll(html).take(4).map { m ->
+            "${stripHtml(m.groupValues[1])}: ${stripHtml(m.groupValues[2])}"
+        }.toList()
+        return if (results.isEmpty()) null else results.joinToString("\n")
+    }
 
-        if (abstractText != null) {
-            return buildString {
-                if (heading != null) append("$heading\n\n")
-                append(abstractText)
-                if (abstractUrl != null) append("\n\nsource: $abstractUrl")
-            }
-        }
+    private fun stripHtml(s: String): String =
+        s.replace(Regex("<[^>]+>"), "").replace("&amp;", "&").replace("&#x27;", "'").replace("&quot;", "\"").trim()
 
-        val related = json.optJSONArray("RelatedTopics")
-        for (i in 0 until (related?.length() ?: 0)) {
-            val text = related!!.getJSONObject(i).optString("Text").ifBlank { null } ?: continue
-            return text
+    /** Persisted as simple JSON in SharedPreferences — (keyword, domain) pairs only, never answer text. */
+    private fun learnedSourcesPrefs(): SharedPreferences =
+        getSharedPreferences("wolfman_learned_sources", MODE_PRIVATE)
+
+    private fun loadLearnedSources(): List<Pair<String, String>> {
+        val raw = learnedSourcesPrefs().getString("entries", null) ?: return emptyList()
+        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+        return (0 until array.length()).mapNotNull { i ->
+            val obj = array.optJSONObject(i) ?: return@mapNotNull null
+            val keywords = obj.optString("keywords").ifBlank { null } ?: return@mapNotNull null
+            val domain = obj.optString("domain").ifBlank { null } ?: return@mapNotNull null
+            keywords to domain
         }
-        return null
+    }
+
+    /** Called after an assistant handoff once the user tells Wolfman where the real answer came from. */
+    private fun teachWolfman(question: String, domain: String) {
+        val keywords = question.lowercase().split(Regex("\\W+")).filter { it.length >= 4 }.joinToString(" ")
+        if (keywords.isBlank()) return
+        val existing = loadLearnedSources().toMutableList()
+        existing.removeAll { it.first == keywords }
+        existing += keywords to domain.trim().removePrefix("https://").removePrefix("http://").trimEnd('/')
+        while (existing.size > 50) existing.removeAt(0)
+        val array = JSONArray()
+        existing.forEach { (kw, d) -> array.put(JSONObject().apply { put("keywords", kw); put("domain", d) }) }
+        learnedSourcesPrefs().edit().putString("entries", array.toString()).apply()
+    }
+
+    /** Shares-a-word match against past taught (question, domain) pairs — a routing hint only. */
+    private fun findLearnedSource(query: String): String? {
+        val queryWords = query.lowercase().split(Regex("\\W+")).filter { it.length >= 4 }.toSet()
+        if (queryWords.isEmpty()) return null
+        return loadLearnedSources().firstOrNull { (keywords, _) ->
+            val overlap = keywords.split(" ").toSet().intersect(queryWords)
+            overlap.isNotEmpty()
+        }?.second
     }
 
     /** Calls the on-device runtime directly \u2014 this phone needs nothing else to answer. */
@@ -665,6 +708,33 @@ class MainActivity : AppCompatActivity() {
         runCatching { startActivity(intent) }.onFailure {
             Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    /**
+     * Lets the user record WHERE the real answer was actually found (e.g. by
+     * Google or Alexa) after Wolfman's own search missed it. Only the site is
+     * remembered, never the answer text itself, so future searches on a
+     * similar question try that site first but still fetch a live result.
+     */
+    private fun promptTeachWolfman() {
+        val question = lastAskedQuestion
+        if (question.isNullOrBlank()) {
+            Toast.makeText(this, "Ask Wolfman something first.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val input = EditText(this).apply { hint = "Website that had the answer, e.g. billboard.com" }
+        AlertDialog.Builder(this)
+            .setTitle("Where was \"$question\" answered?")
+            .setView(input)
+            .setPositiveButton("Teach") { _, _ ->
+                val domain = input.text.toString().trim()
+                if (domain.isNotEmpty()) {
+                    teachWolfman(question, domain)
+                    Toast.makeText(this, "Learned: try $domain for questions like this.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 }
 
