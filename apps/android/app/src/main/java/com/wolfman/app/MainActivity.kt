@@ -178,6 +178,16 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            if (answer == null) {
+                val outcome = runCatching { searchWeb(question) }
+                val text = outcome.getOrNull()
+                if (outcome.isSuccess && text != null) {
+                    answer = text
+                } else {
+                    attempts += "Web search (DuckDuckGo): ${outcome.exceptionOrNull()?.message ?: "no result for this query"}"
+                }
+            }
+
             val finalText = answer ?: buildString {
                 append("NO_LIVE_SOURCE: no provider answered.\n")
                 if (attempts.isNotEmpty()) {
@@ -241,6 +251,44 @@ class MainActivity : AppCompatActivity() {
         } else {
             json.optJSONArray("data")?.optJSONObject(0)?.optString("id")
         }
+    }
+
+    /**
+     * Live, keyless public web search — no cloud SDK, no API key. Same source
+     * DuckDuckGo Instant Answer API as the desktop core's `internet.ts`. This
+     * is Wolfman's own fallback for finding a real answer when no model
+     * runtime or daemon could, before ever suggesting an assistant handoff.
+     */
+    private fun searchWeb(query: String): String? {
+        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+        val url = "https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1&skip_disambig=1"
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 6_000
+            readTimeout = 8_000
+        }
+        if (connection.responseCode !in 200..299) throw java.io.IOException("HTTP ${connection.responseCode}")
+
+        val raw = connection.inputStream.bufferedReader().use { it.readText() }
+        val json = JSONObject(raw)
+        val heading = json.optString("Heading").ifBlank { null }
+        val abstractText = json.optString("AbstractText").ifBlank { null }
+        val abstractUrl = json.optString("AbstractURL").ifBlank { null }
+
+        if (abstractText != null) {
+            return buildString {
+                if (heading != null) append("$heading\n\n")
+                append(abstractText)
+                if (abstractUrl != null) append("\n\nsource: $abstractUrl")
+            }
+        }
+
+        val related = json.optJSONArray("RelatedTopics")
+        for (i in 0 until (related?.length() ?: 0)) {
+            val text = related!!.getJSONObject(i).optString("Text").ifBlank { null } ?: continue
+            return text
+        }
+        return null
     }
 
     /** Calls the on-device runtime directly \u2014 this phone needs nothing else to answer. */
