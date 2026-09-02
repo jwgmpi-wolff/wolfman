@@ -79,7 +79,6 @@ class MainActivity : AppCompatActivity() {
     )
 
     private lateinit var statusView: TextView
-    private lateinit var daemonUrlInput: EditText
     private lateinit var questionInput: EditText
     private lateinit var speakRepliesToggle: CheckBox
     private lateinit var azureSignInButton: Button
@@ -112,9 +111,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         statusView = TextView(this).apply { text = "Detecting on-device AI providers\u2026" }
-        daemonUrlInput = EditText(this).apply {
-            hint = "Optional: PC daemon URL (bonus LAN peer, e.g. http://10.0.0.35:8791)"
-        }
         questionInput = EditText(this).apply { hint = "Ask Wolfman\u2026" }
         val askButton = Button(this).apply { text = "Ask" }
         val speakButton = Button(this).apply { text = "\uD83C\uDFA4 Speak" }
@@ -132,7 +128,6 @@ class MainActivity : AppCompatActivity() {
         azureSignInButton.setOnClickListener { signInToAzure() }
 
         root.addView(statusView)
-        root.addView(daemonUrlInput)
         root.addView(questionInput)
         root.addView(askButton)
         root.addView(speakButton)
@@ -318,7 +313,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * Calls the hosted Wolfman MCP daemon (Azure OpenAI behind the App Service's
      * own managed identity) over its `wolfman.ask` tool, authenticated with a
-     * real Entra ID bearer token. Same live-or-throw contract as `callDaemon`.
+     * real Entra ID bearer token. Same live-or-throw contract as `callLocal`.
      */
     private fun callAzureMcp(token: String, question: String): String {
         val body = JSONObject().apply {
@@ -408,17 +403,6 @@ class MainActivity : AppCompatActivity() {
                     break
                 }
                 attempts += "${local.kind}@${local.baseUrl}: ${outcome.exceptionOrNull()?.message ?: refusalReason(text)}"
-            }
-
-            val daemonUrl = daemonUrlInput.text.toString().trim().trimEnd('/')
-            if (answer == null && daemonUrl.isNotEmpty()) {
-                val outcome = runCatching { callDaemon(daemonUrl, question) }
-                val text = outcome.getOrNull()
-                if (outcome.isSuccess && text != null && !looksLikeRefusal(text)) {
-                    answer = text
-                } else {
-                    attempts += "PC daemon ($daemonUrl): ${outcome.exceptionOrNull()?.message ?: refusalReason(text)}"
-                }
             }
 
             if (answer == null) {
@@ -583,40 +567,6 @@ class MainActivity : AppCompatActivity() {
             json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
         }
         return text?.ifBlank { null } ?: throw java.io.IOException("empty response body")
-    }
-
-    /** Calls a PC daemon's `wolfman.ask` MCP tool over HTTP \u2014 optional bonus peer only. */
-    private fun callDaemon(baseUrl: String, question: String): String {
-        val body = JSONObject().apply {
-            put("jsonrpc", "2.0")
-            put("id", UUID.randomUUID().toString())
-            put("method", "tools/call")
-            put("params", JSONObject().apply {
-                put("name", "wolfman.ask")
-                put("arguments", JSONObject().apply { put("text", question) })
-            })
-        }
-
-        val connection = (URL(baseUrl).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 10_000
-            readTimeout = 90_000
-            setRequestProperty("Content-Type", "application/json")
-        }
-
-        OutputStreamWriter(connection.outputStream).use { it.write(body.toString()) }
-
-        if (connection.responseCode !in 200..299) throw java.io.IOException("HTTP ${connection.responseCode}")
-
-        val raw = connection.inputStream.bufferedReader().use { it.readText() }
-        val json = JSONObject(raw)
-        json.optJSONObject("error")?.let { error -> throw java.io.IOException(error.optString("message", "daemon reported an error")) }
-
-        val result = json.optJSONObject("result") ?: throw java.io.IOException("malformed daemon response")
-        val content = result.optJSONArray("content")
-        val text = (0 until (content?.length() ?: 0)).joinToString("\n") { i -> content!!.getJSONObject(i).optString("text") }
-        return text.ifBlank { null } ?: throw java.io.IOException("daemon returned an empty answer")
     }
 
     /**
