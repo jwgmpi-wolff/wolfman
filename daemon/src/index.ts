@@ -21,7 +21,8 @@ import { AuditLog } from '../../core/src/policy/audit.js';
 import { SettingsStore } from '../../core/src/policy/settings.js';
 import { LearningProfile } from '../../core/src/policy/profile.js';
 import { preClassify } from '../../core/src/orchestrator/router.js';
-import { NoLiveSourceError, type DeviceRef, type DeviceState, type WolfRequest } from '@wolfman/protocol';
+import { AzureOpenAIProvider } from './providers/azure-openai.js';
+import { NoLiveSourceError, type DeviceRef, type DeviceState, type WolfmanSettings, type WolfRequest } from '@wolfman/protocol';
 
 const DATA_DIR = path.join(os.homedir(), '.wolfman');
 const PORT = Number(process.env.WOLFMAN_PORT ?? 8791);
@@ -75,12 +76,29 @@ export async function main() {
     console.log(`  ✗ ${r.candidate.displayName.padEnd(28)} ${r.probe.failure?.code}: ${r.probe.failure?.message}`);
   }
 
+  if (AzureOpenAIProvider.isConfigured()) {
+    const descriptor = await registry.registerDirect(new AzureOpenAIProvider(device));
+    const status = descriptor.lastProbe?.status === 'available' ? '✓' : '✗';
+    console.log(`  ${status} ${descriptor.displayName.padEnd(28)} ${descriptor.transport.padEnd(20)} ${descriptor.privacyTier.padEnd(10)} ${descriptor.lastProbe?.latencyMs ?? '?'}ms`);
+  }
+
+  const settings = new SettingsStore(path.join(DATA_DIR, 'settings.json'));
+  // Operator-set floor for this host's mode (e.g. WOLFMAN_MODE=connected on the
+  // hosted Azure daemon so its cloud provider is reachable) — never changes the
+  // library default, only this process's persisted settings file.
+  if (process.env.WOLFMAN_MODE) {
+    const current = await settings.load();
+    if (current.mode !== process.env.WOLFMAN_MODE) {
+      await settings.save({ ...current, mode: process.env.WOLFMAN_MODE as WolfmanSettings['mode'] });
+    }
+  }
+
   const orch = new Orchestrator({
     providers: () => registry.all(),
     deviceState,
     presence,
     audit,
-    settings: new SettingsStore(path.join(DATA_DIR, 'settings.json')),
+    settings,
     learning: new LearningProfile(path.join(DATA_DIR, 'profile.json')),
     refresh: () => registry.refresh(),
   });

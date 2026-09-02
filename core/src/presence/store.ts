@@ -15,8 +15,11 @@ const LEGAL: Record<PresenceState, PresenceState[]> = {
   armed:     ['listening', 'idle', 'thinking', 'error'],
   listening: ['thinking', 'idle', 'error'],
   thinking:  ['rendering', 'speaking', 'idle', 'error'],
-  rendering: ['speaking', 'idle', 'error'],
-  speaking:  ['idle', 'error'],
+  // A new request may always interrupt a prior one still rendering/speaking —
+  // otherwise a request that never reached 'idle' (e.g. process killed mid-flight)
+  // wedges every future request behind an illegal-transition throw forever.
+  rendering: ['speaking', 'idle', 'thinking', 'error'],
+  speaking:  ['idle', 'thinking', 'error'],
   error:     ['idle', 'armed'],
 };
 

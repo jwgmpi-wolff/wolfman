@@ -103,6 +103,25 @@ export class ProviderRegistry {
     return { registered, rejected };
   }
 
+  /**
+   * Directly registers an already-constructed provider after a live probe —
+   * for statically-configured peers (e.g. a cloud endpoint reached via env
+   * config) that never go through local candidate discovery.
+   */
+  async registerDirect(provider: Provider, timeoutMs = 6000): Promise<ProviderDescriptor> {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      provider.descriptor.lastProbe = await provider.probe(ac.signal);
+    } catch (e: any) {
+      provider.descriptor.lastProbe = failedProbe('PROBE_THREW', String(e?.message ?? e));
+    } finally {
+      clearTimeout(t);
+    }
+    this.providers.set(provider.descriptor.id, provider);
+    return provider.descriptor;
+  }
+
   /** Re-probes everything. Called on a timer and before high-stakes requests. */
   async refresh(timeoutMs = 6000): Promise<void> {
     await Promise.all(
