@@ -3,6 +3,7 @@ package com.wolfman.app
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -13,6 +14,7 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.text.method.ScrollingMovementMethod
+import android.util.Log
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -67,6 +69,7 @@ import java.util.concurrent.TimeUnit
 class MainActivity : AppCompatActivity() {
 
     private companion object {
+        const val TAG = "Wolfman"
         const val AZURE_MCP_URL = "https://wolfman-mcp.azurewebsites.net/"
         const val AZURE_MCP_SCOPE = "api://20ed062d-2af7-4554-a27c-ce9e7bf367f2/access_as_user"
     }
@@ -144,7 +147,10 @@ class MainActivity : AppCompatActivity() {
         speakButton.setOnClickListener { listenForQuestion() }
         azureSignInButton.setOnClickListener { signInToAzure() }
         teachButton.setOnClickListener { promptTeachWolfman() }
-        autoListenToggle.setOnCheckedChangeListener { _, checked -> if (checked) listenForQuestion() }
+        autoListenToggle.setOnCheckedChangeListener { _, checked ->
+            Log.d(TAG, "autoListenToggle checked=$checked")
+            if (checked) listenForQuestion()
+        }
 
         root.addView(statusView)
         root.addView(questionInput)
@@ -177,13 +183,16 @@ class MainActivity : AppCompatActivity() {
      * while handing off to Google/Alexa, when it must stay off the mic.
      */
     private fun listenForQuestion() {
+        Log.d(TAG, "listenForQuestion() called")
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "listenForQuestion: RECORD_AUDIO not granted")
             ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.RECORD_AUDIO), 1)
             Toast.makeText(this, "Microphone permission is needed to speak to Wolfman.", Toast.LENGTH_LONG).show()
             return
         }
         val recognizer = speechRecognizer
         if (recognizer == null) {
+            Log.d(TAG, "listenForQuestion: speechRecognizer is null (not available on this device)")
             Toast.makeText(this, "No speech recognizer is available on this device.", Toast.LENGTH_LONG).show()
             return
         }
@@ -195,10 +204,12 @@ class MainActivity : AppCompatActivity() {
 
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
+                Log.d(TAG, "listenForQuestion: onReadyForSpeech")
                 Handler(Looper.getMainLooper()).post { statusView.text = "Listening\u2026" }
             }
             override fun onResults(results: Bundle?) {
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                Log.d(TAG, "listenForQuestion: onResults text=$text")
                 Handler(Looper.getMainLooper()).post {
                     if (text.isNullOrBlank()) {
                         Toast.makeText(this@MainActivity, "Didn't catch that \u2014 try again.", Toast.LENGTH_SHORT).show()
@@ -213,6 +224,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             override fun onError(error: Int) {
+                Log.d(TAG, "listenForQuestion: onError code=$error")
                 Handler(Looper.getMainLooper()).post {
                     Toast.makeText(this@MainActivity, "Speech recognition error ($error)", Toast.LENGTH_SHORT).show()
                     restartAutoListenIfEnabled()
@@ -229,10 +241,18 @@ class MainActivity : AppCompatActivity() {
         recognizer.startListening(intent)
     }
 
-    /** Restarts listening on its own after a short pause, only while Auto-listen stays checked. */
+    /** Restarts listening on its own after a pause long enough for the recognizer to fully reset (avoids ERROR_CLIENT from restarting too fast), only while Auto-listen stays checked. */
     private fun restartAutoListenIfEnabled() {
+        Log.d(TAG, "restartAutoListenIfEnabled: autoListenToggle.isChecked=${autoListenToggle.isChecked}")
         if (!autoListenToggle.isChecked) return
-        Handler(Looper.getMainLooper()).postDelayed({ if (autoListenToggle.isChecked) listenForQuestion() }, 800)
+        recreateSpeechRecognizer()
+        Handler(Looper.getMainLooper()).postDelayed({ if (autoListenToggle.isChecked) listenForQuestion() }, 1800)
+    }
+
+    /** Destroys and recreates the recognizer — reusing one instance across rapid restarts is what causes repeated ERROR_CLIENT (5). */
+    private fun recreateSpeechRecognizer() {
+        speechRecognizer?.destroy()
+        speechRecognizer = if (SpeechRecognizer.isRecognitionAvailable(this)) SpeechRecognizer.createSpeechRecognizer(this) else null
     }
 
     /**
@@ -243,6 +263,7 @@ class MainActivity : AppCompatActivity() {
      * speaking, then starts listening for that spoken reply.
      */
     private fun onTtsFinished(utteranceId: String?) {
+        Log.d(TAG, "onTtsFinished utteranceId=$utteranceId pendingHandoffQuestion=$pendingHandoffQuestion")
         when (utteranceId) {
             "wolfman-reply" -> restartAutoListenIfEnabled()
             "wolfman-handoff" -> {
@@ -738,15 +759,22 @@ class MainActivity : AppCompatActivity() {
         pendingHandoffQuestion = question
 
         if (assistant.canVoiceCommand) {
+            Log.d(TAG, "handOff: launching ${assistant.packageName} via ACTION_VOICE_COMMAND")
             runCatching { startActivity(Intent(Intent.ACTION_VOICE_COMMAND).setPackage(assistant.packageName)) }
-                .onFailure { Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show(); return }
+                .onFailure { Log.d(TAG, "handOff: startActivity failed: ${it.message}"); Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show(); return }
 
             val phrase = wakePhrases[assistant.packageName]
             val askForSource = "$question, and please tell me what website or source that came from"
             val utterance = if (phrase != null) "$phrase, $askForSource" else askForSource
             Handler(Looper.getMainLooper()).postDelayed({
+                Log.d(TAG, "handOff: speaking utterance=$utterance")
+                // Max out media volume first: the assistant only hears this at all if its mic
+                // can pick up our own speaker clearly enough to beat the device's echo cancellation.
+                val audioManager = getSystemService(AUDIO_SERVICE) as? AudioManager
+                audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0)
                 tts?.language = Locale.US
-                tts?.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, "wolfman-handoff")
+                val result = tts?.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, "wolfman-handoff")
+                Log.d(TAG, "handOff: tts.speak() returned $result")
             }, 1300)
             return
         }
@@ -775,13 +803,16 @@ class MainActivity : AppCompatActivity() {
      * never presented back as an answer itself.
      */
     private fun listenForAssistantReply(question: String) {
+        Log.d(TAG, "listenForAssistantReply() called for question=$question")
         pendingHandoffQuestion = null
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "listenForAssistantReply: RECORD_AUDIO not granted")
             Toast.makeText(this, "Microphone permission is needed to learn from the reply.", Toast.LENGTH_LONG).show()
             return
         }
         val recognizer = speechRecognizer
         if (recognizer == null) {
+            Log.d(TAG, "listenForAssistantReply: speechRecognizer is null")
             Toast.makeText(this, "No speech recognizer is available on this device.", Toast.LENGTH_LONG).show()
             return
         }
@@ -793,9 +824,10 @@ class MainActivity : AppCompatActivity() {
 
         Toast.makeText(this, "Wolfman is listening for the reply\u2026", Toast.LENGTH_SHORT).show()
         recognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onReadyForSpeech(params: Bundle?) { Log.d(TAG, "listenForAssistantReply: onReadyForSpeech") }
             override fun onResults(results: Bundle?) {
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                Log.d(TAG, "listenForAssistantReply: onResults text=$text")
                 Handler(Looper.getMainLooper()).post {
                     if (!text.isNullOrBlank()) {
                         recordLearning(question, text)
@@ -806,6 +838,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             override fun onError(error: Int) {
+                Log.d(TAG, "listenForAssistantReply: onError code=$error")
                 Handler(Looper.getMainLooper()).post {
                     Toast.makeText(this@MainActivity, "Didn't catch a reply to learn from (error $error).", Toast.LENGTH_SHORT).show()
                 }
@@ -819,6 +852,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         runCatching { recognizer.startListening(intent) }
+            .onFailure { Log.d(TAG, "listenForAssistantReply: startListening threw: ${it.message}") }
     }
 
     /**
