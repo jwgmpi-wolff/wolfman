@@ -1,121 +1,87 @@
-# Wolfman
+# WOLFMAN
 
-Wolfman helps with money, tasks, goals, and habits. Your data stays on your device unless you turn on cloud sync.
+A personal, cross-device AI orchestrator. It discovers the AI apps and model runtimes **already installed** on your Windows PC, Mac, Android phone and tablets, registers each one as a live provider, and becomes the single interface to all of them. Call it by name — **"wolfman"** — or use a hotkey.
 
-## Install Wolfman
+It answers questions, gives advice, runs analysis, works through strategy, and looks up general public information (directions, phone numbers, hours, addresses).
 
-Pick your device. Do the one step under its name.
+## The two rules
 
-### Windows
+**1. Everything is live.** Every answer comes from a call executed at request time — a model inference, an MCP tool call, or a web fetch. There are no canned answers, no sample data, no fixtures, no seeded records anywhere in this codebase. When nothing is reachable, Wolfman returns `NO_LIVE_SOURCE` with the full list of providers it tried and exactly why each one failed. It never fills the gap from memory.
 
-Copy this whole line. Paste it into PowerShell. Press **Enter**.
+**2. Nothing is assumed.** A provider is registered only after a real handshake succeeds. Detected-but-unusable apps are surfaced with the reason (`NO_PROGRAMMABLE_SURFACE`, `UNAUTHORIZED`, `MCP_INITIALIZE_FAILED`) so you know what to enable.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/jwgmpi-wolff/wolfman/main/scripts/install-windows.ps1 | iex"
-```
+`npm run policy:check` enforces rule 1 mechanically and fails the build if a mock, sample, canned or purged-domain path is reintroduced — including any Azure/cloud SDK import inside `core/`, since [standalone operation](docs/STANDALONE.md) is a structural guarantee, not a convention.
 
-This gets every tool Wolfman needs. It also gets the AI models. The download is about 25 GB. Wolfman opens when it is done.
-
-### Linux
-
-Copy this whole line. Paste it into a terminal. Press **Enter**.
+## Quick start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jwgmpi-wolff/wolfman/main/scripts/install-linux.sh | bash
-```
-
-This works on Ubuntu, Debian, Fedora, Arch, and openSUSE. It gets every tool Wolfman needs. It also gets the AI models. The download is about 25 GB. Wolfman opens when it is done.
-
-### Android
-
-[Tap here to get the Android app.](https://raw.githubusercontent.com/jwgmpi-wolff/wolfman/main/releases/Wolfman-debug.apk)
-
-Open the file. Tap **Install**. Your phone may ask you to allow this install.
-
-Android cannot run Wolfman's large local AI models. The rest of the app still works.
-
-### Mac, iPhone, iPad, or Chromebook
-
-[Open Wolfman in your web browser.](https://jwgmpi-wolff.github.io/wolfman/)
-
-Use your browser menu. Pick **Install app** or **Add to Home Screen**.
-
-The web app cannot install the large local AI models for you. The rest of the app still works.
-
-## What the desktop install does
-
-The Windows and Linux commands get Git, Node.js 22, Ollama, Wolfman, and two AI models. They build the app, install it, and open it. Run the same command later to get a new Wolfman version. Your saved Wolfman data is not removed.
-
-## Features
-
-- Starts empty: no sample transactions, tasks, goals, or habits
-- 50/30/20 budget pacing and transaction tracking as you enter data
-- Savings goals, Eisenhower task planning, and weekly habits
-- CSV/JSON transaction and dataset imports with local analysis
-- Keyboard or voice requests only — Wolfman never volunteers unprompted suggestions
-- Optional local Ollama agent with tools for finances, datasets, stocks, Microsoft 365, web search, and confirmed SMS
-- Optional consented, read-only Microsoft 365 access (email, Teams chats, files) and public web page reading
-- Offline-capable Progressive Web App (PWA)
-- Optional passwordless, account-isolated cloud backup through Supabase
-
-Wolfman provides educational analysis and is not a substitute for professional financial advice.
-
-## Build it yourself
-
-You need Node.js 22 or newer and npm.
-
-```powershell
 npm install
-Copy-Item .env.example .env.local
-npm run dev
+npm run build      # policy gate, then compiles packages/protocol, then everything else
+npm run discover    # prints what is ACTUALLY on this machine
+npm run ask -- "what time does the Everett DMV close today"
+npm run voice on    # read every answer aloud via the OS's built-in TTS
+npm run daemon      # expose this device to your other devices
 ```
 
-Cloud and Microsoft configuration are both optional. Without them, all data remains in browser local storage and Wolfman answers only from what you type or say, or a public URL you provide.
+`npm run discover` prints three sections: candidates found, providers that passed a live probe, and providers that were rejected with the specific failure. Nothing is invented.
 
-## Change the local AI
+## Architecture
 
-The one-step desktop install sets up Ollama for you. To use other models, set `VITE_OLLAMA_URL`, `VITE_OLLAMA_MODEL`, or `VITE_OLLAMA_VISION_MODEL` in `.env.local` before building the app.
-
-The Windows desktop app starts the local Ollama server when needed. Browser development requires Ollama to already be running. Wolfman can inspect pasted or attached images, sample frames from attached videos and direct video-file URLs, and inspect representative thumbnails for YouTube links. Remote hosts must permit browser media access. If Ollama or the configured model is unavailable, Wolfman uses its built-in text request handlers instead.
-
-## Validate
-
-```powershell
-npm run lint
-npm run build
+```
+Wake layer      hotword "wolfman" | hotkey | tray | tile | bubble
+Presence layer  listening indicator — parallel voice-ON / voice-OFF paths
+Orchestrator    classify -> plan -> gather live facts -> execute -> poll fallback -> merge -> provenance
+MCP host        stdio + HTTP/SSE clients, tool registry, ACLs
+Adapters        local runtimes | installed apps | OS assistants | peer devices
+Transport       loopback + LAN mesh over mTLS
 ```
 
-## Enable private cloud sync
+| Path | What lives there |
+|---|---|
+| `packages/protocol/src/index.ts` | Wire types + the `Provider` contract. Everything depends on this and nothing else. |
+| `packages/voice/src/` | Wake-word/VAD pipeline contract, plus the real on-device TTS engine (`nativeTts.ts`). |
+| `core/src/discovery/index.ts` | Real OS probes: registry/AppX/processes (Windows), bundles/Spotlight/launchd/brew (macOS), PackageManager (Android), loopback port scan, mDNS, existing MCP config files. |
+| `core/src/providers/registry.ts` | Self-registering adapters. Adding a new AI app touches zero router code. |
+| `core/src/orchestrator/router.ts` | Per-request scoring: operating mode, privacy tier, measured latency, context fit, tools, battery/thermal/metered state. Exposes the full ranked fallback chain. |
+| `core/src/orchestrator/index.ts` | Execution, live-fact chaining, polling the fallback chain until something answers, provenance, `NO_LIVE_SOURCE`. |
+| `core/src/policy/` | No-mock enforcement, redaction, settings (mode/lockToDevice), the local learning profile, append-only audit log. |
+| `core/src/presence/store.ts` | One state machine driving every platform's indicator. |
+| `core/src/cli.ts` | `discover`, `ask`, and `voice on\|off`. |
+| `daemon/`, `apps/` | LAN mesh node, per-platform hosts (Android on-device runtime scaffold under `apps/android/`). |
 
-1. Create a Supabase project.
-2. Run [supabase/schema.sql](supabase/schema.sql) in the SQL editor.
-3. Copy `.env.example` to `.env.local` and enter the project URL and public anon key.
-4. Add the deployed URL to Supabase Authentication > URL Configuration.
-5. For GitHub Pages, add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as repository Actions secrets.
+See [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md), [docs/ADAPTERS.md](docs/ADAPTERS.md) and [docs/STANDALONE.md](docs/STANDALONE.md) for the full design.
 
-The SQL schema enables row-level security and denies anonymous access. Never expose a service-role key in a browser application.
+## Provider discovery
 
-Sync is intentionally manual: **Upload this device** replaces the cloud backup, and **Restore from cloud** replaces local data. This prevents an older device from silently overwriting newer records.
+| OS | Probe |
+|---|---|
+| Windows | Uninstall registry hives, AppX/MSIX manifests, running processes, `%LOCALAPPDATA%\Programs` + Program Files |
+| macOS | `/Applications` + `~/Applications`, Spotlight bundle query, `launchctl list`, Homebrew formulae |
+| Android | `RoleManager.ROLE_ASSISTANT`, assist/voice intent filters, `ACTION_PROCESS_TEXT` handlers, installed packages |
+| All | Loopback ports (11434, 1234, 8080, 8000, 5000, 4891, 3000…), mDNS `_wolfman._tcp` / `_mcp._tcp`, existing `mcp.json` configs |
 
-## Enable Microsoft 365 access
+Name matching only produces a *candidate*. Registration requires a live handshake, so a false positive costs one failed probe and nothing more.
 
-1. Register a single-tenant or multi-tenant **public client (SPA)** app in Microsoft Entra ID, with no client secret.
-2. Add a **Single-page application** redirect URI matching your dev URL (`http://localhost:5173/`) and deployed URL.
-3. Grant the delegated Microsoft Graph permissions `User.Read`, `Mail.Read`, `Chat.Read`, and `Files.Read.All`.
-4. Copy `.env.example` to `.env.local` and enter the application (client) ID and tenant ID.
-5. For GitHub Pages, add `VITE_MICROSOFT_CLIENT_ID` and `VITE_MICROSOFT_TENANT_ID` as repository Actions secrets.
+## Routing
 
-Each user connects their own Microsoft account from **Settings > Connections** and consents to the requested read-only scopes. Wolfman only reads email, Teams chats, or files when the user's message asks for them, and never stores that content locally.
+Every eligible provider is scored per request. Operating mode (`standalone` default / `mesh` / `connected`) and `lockToDevice` are applied **before** scoring — see [docs/STANDALONE.md](docs/STANDALONE.md). If the top choice can't answer, Wolfman polls the rest of the ranked list one at a time until one resolves the request or every provider has been tried.
 
-## Deploy
+- **Privacy first** — `on-device` (+120) > `lan` (+70) > `cloud` (+20).
+- **Measured latency**, not estimates — taken from the last real probe.
+- **Context-window fit** against the actual prompt size.
+- **Tool availability** — required for public-info intents (directions, phone numbers, hours, addresses), which are always forced through a live tool call and carry a source URL + fetch timestamp.
 
-The included workflow deploys `main` to GitHub Pages. In repository Settings > Pages, set the source to **GitHub Actions**. The app uses the repository name as its production base path.
+Modes: **single**, **fan-out** (parallel, disagreements surfaced rather than averaged away), **chain** (a tool provider fetches live facts, a reasoning provider synthesises them).
 
-## Data and privacy
+## Local learning
 
-- Local data is stored in the browser profile.
-- Cloud data is associated with the authenticated user ID and protected by Supabase row-level security.
-- No financial credentials or bank login data are requested or stored.
-- Microsoft tokens are cached only in browser session storage and are cleared when the tab session ends or you disconnect.
-- Wolfman reads Microsoft or public web content only in direct response to a user request, and does not persist that content in local storage.
-- Clearing browser storage removes unsynced local data.
+Wolfman adapts to you from real usage: recurring topics, typical request length, which providers you keep coming back to (`core/src/policy/profile.ts`). This is phrasing/preference guidance only — it can steer wording or provider order, but it is never a source of factual content and never substitutes for a live call. Disable it any time by setting `learningEnabled: false` in `~/.wolfman/settings.json`.
+
+## Privacy
+
+Pre-wake-word audio lives in a fixed-size ring buffer that is continuously overwritten, never persisted. Redaction (emails, phones, SSNs, cards, API keys, JWTs, GUIDs) runs before any cloud call; on-device providers get the text untouched. The audit log — request, providers attempted, tools called, timestamps, egress destinations — is append-only JSONL on your device (`~/.wolfman/audit.jsonl`) and is never uploaded.
+
+## Cross-device mesh
+
+Each device runs the daemon, exposing `wolfman.ask` and `wolfman.providers` over MCP. Peers are found via mDNS, paired once with a short code, then talk over mTLS with pinned certs. Offline devices are simply absent from the pool — nothing is queued and nothing is faked.
+

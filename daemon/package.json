@@ -1,0 +1,2 @@
+{ "name": "@wolfman/daemon", "version": "1.0.0", "type": "module", "main": "src/index.ts",
+  "dependencies": { "@wolfman/core": "*", "@wolfman/protocol": "*" } }

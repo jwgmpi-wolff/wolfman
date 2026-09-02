@@ -1,0 +1,21 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      # The no-mock rule is enforced before anything else compiles.
+      - name: Policy gate
+        run: node scripts/policy-check.mjs
+      - run: npm ci
+      - run: npx tsc -b packages/protocol/tsconfig.json
+      - run: npx tsc -b tsconfig.json
+      # Discovery must run against the real runner and report honestly.
+      - name: Discovery smoke test
+        run: node wolfman-dist/core/src/cli.js discover

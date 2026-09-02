@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Wolfman</string>
-    <string name="title_activity_main">Wolfman</string>
-    <string name="package_name">org.wolffentp.wolfman</string>
-    <string name="custom_url_scheme">org.wolffentp.wolfman</string>
-</resources>

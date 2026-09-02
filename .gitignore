@@ -34,6 +34,11 @@ releases/*.exe
 # azd local environment state (never committed; secrets live only here locally)
 functions/.azure/
 
+# Wolfman core TypeScript build output
+wolfman-dist/
+packages/protocol/dist/
+*.tsbuildinfo
+
 !.env.example
 
 # Editor directories and files
