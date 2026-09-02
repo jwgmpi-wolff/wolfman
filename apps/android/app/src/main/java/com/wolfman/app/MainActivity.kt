@@ -668,11 +668,14 @@ class MainActivity : AppCompatActivity() {
      * Real voice handoff, per assistant. Launches the assistant into its own
      * listening state (ACTION_VOICE_COMMAND when supported), then — after a
      * short warm-up delay — speaks the assistant's real wake phrase followed
-     * by your last question aloud through the speaker, so its OWN microphone
-     * hears it, exactly as if you'd said it. Falls back to ACTION_PROCESS_TEXT
-     * (typed handoff) or a plain open when voice-command isn't supported.
-     * The reply always appears in the assistant's own UI: no public API lets
-     * Wolfman read a voice assistant's answer back, spoken or written.
+     * by your last question PLUS a request to name its source aloud through
+     * the speaker, so its OWN microphone hears it, exactly as if you'd said
+     * it. Falls back to ACTION_PROCESS_TEXT (typed handoff) or a plain open
+     * when voice-command isn't supported. The reply always appears in the
+     * assistant's own UI: no public API lets Wolfman read a voice assistant's
+     * answer back, so once you hear its source, tell Wolfman via "Teach
+     * Wolfman" (prompted automatically after the handoff) so it can check
+     * that site itself next time.
      */
     private fun handOff(assistant: AssistantCandidate) {
         val question = lastAskedQuestion ?: questionInput.text.toString().trim()
@@ -686,11 +689,13 @@ class MainActivity : AppCompatActivity() {
                 .onFailure { Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show(); return }
 
             val phrase = wakePhrases[assistant.packageName]
-            val utterance = if (phrase != null) "$phrase, $question" else question
+            val askForSource = "$question, and please tell me what website or source that came from"
+            val utterance = if (phrase != null) "$phrase, $askForSource" else askForSource
             Handler(Looper.getMainLooper()).postDelayed({
                 tts?.language = Locale.US
                 tts?.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, "wolfman-handoff")
             }, 1300)
+            Handler(Looper.getMainLooper()).postDelayed({ promptTeachWolfman() }, 9000)
             return
         }
 
