@@ -527,15 +527,16 @@ class MainActivity : AppCompatActivity() {
     /**
      * Real, live web search — DuckDuckGo's HTML result page (organic results),
      * not the weak Instant-Answer API, which only ever matched curated topic
-     * summaries and missed most real questions. If a learned source exists for
-     * a similar past question (see `teachWolfman`), that site is tried first
-     * — Wolfman remembers WHERE an answer was found before, never the answer
-     * itself, so the result here is always fetched live.
+     * summaries and missed most real questions. If Wolfman learning has a
+     * source hint for a similar past question (see `recordLearning`), that
+     * hint is added to the query first — Wolfman remembers WHERE an answer
+     * was found before, never the answer itself, so the result here is
+     * always fetched live.
      */
     private fun searchWeb(query: String): String? {
-        val learnedDomain = findLearnedSource(query)
-        if (learnedDomain != null) {
-            val scoped = runCatching { htmlSearch("site:$learnedDomain $query") }.getOrNull()
+        val hint = findLearnedSource(query)
+        if (hint != null) {
+            val scoped = runCatching { htmlSearch("$query $hint") }.getOrNull()
             if (scoped != null) return scoped
         }
         return htmlSearch(query) ?: throw java.io.IOException("no live web results for this query")
@@ -562,35 +563,41 @@ class MainActivity : AppCompatActivity() {
     private fun stripHtml(s: String): String =
         s.replace(Regex("<[^>]+>"), "").replace("&amp;", "&").replace("&#x27;", "'").replace("&quot;", "\"").trim()
 
-    /** Persisted as simple JSON in SharedPreferences — (keyword, domain) pairs only, never answer text. */
-    private fun learnedSourcesPrefs(): SharedPreferences =
-        getSharedPreferences("wolfman_learned_sources", MODE_PRIVATE)
+    /** Persisted as simple JSON in SharedPreferences — (keywords, hint) pairs only, never answer text. */
+    private fun learningPrefs(): SharedPreferences =
+        getSharedPreferences("wolfman_learning", MODE_PRIVATE)
 
     private fun loadLearnedSources(): List<Pair<String, String>> {
-        val raw = learnedSourcesPrefs().getString("entries", null) ?: return emptyList()
+        val raw = learningPrefs().getString("entries", null) ?: return emptyList()
         val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
         return (0 until array.length()).mapNotNull { i ->
             val obj = array.optJSONObject(i) ?: return@mapNotNull null
             val keywords = obj.optString("keywords").ifBlank { null } ?: return@mapNotNull null
-            val domain = obj.optString("domain").ifBlank { null } ?: return@mapNotNull null
-            keywords to domain
+            val hint = obj.optString("hint").ifBlank { null } ?: return@mapNotNull null
+            keywords to hint
         }
     }
 
-    /** Called after an assistant handoff once the user tells Wolfman where the real answer came from. */
-    private fun teachWolfman(question: String, domain: String) {
+    /**
+     * Records a real (question, source-hint) pair to Wolfman's learning store
+     * — never the answer itself. `sourceHint` is whatever was actually heard
+     * or typed (a domain, a site name, a captured transcription); it is only
+     * ever used later as extra search terms, so a live fetch still happens.
+     */
+    private fun recordLearning(question: String, sourceHint: String) {
         val keywords = question.lowercase().split(Regex("\\W+")).filter { it.length >= 4 }.joinToString(" ")
-        if (keywords.isBlank()) return
+        val hint = sourceHint.trim().removePrefix("https://").removePrefix("http://").trimEnd('/')
+        if (keywords.isBlank() || hint.isBlank()) return
         val existing = loadLearnedSources().toMutableList()
         existing.removeAll { it.first == keywords }
-        existing += keywords to domain.trim().removePrefix("https://").removePrefix("http://").trimEnd('/')
+        existing += keywords to hint
         while (existing.size > 50) existing.removeAt(0)
         val array = JSONArray()
-        existing.forEach { (kw, d) -> array.put(JSONObject().apply { put("keywords", kw); put("domain", d) }) }
-        learnedSourcesPrefs().edit().putString("entries", array.toString()).apply()
+        existing.forEach { (kw, h) -> array.put(JSONObject().apply { put("keywords", kw); put("hint", h) }) }
+        learningPrefs().edit().putString("entries", array.toString()).apply()
     }
 
-    /** Shares-a-word match against past taught (question, domain) pairs — a routing hint only. */
+    /** Shares-a-word match against past learned (question, hint) pairs — a routing hint only. */
     private fun findLearnedSource(query: String): String? {
         val queryWords = query.lowercase().split(Regex("\\W+")).filter { it.length >= 4 }.toSet()
         if (queryWords.isEmpty()) return null
@@ -671,11 +678,9 @@ class MainActivity : AppCompatActivity() {
      * by your last question PLUS a request to name its source aloud through
      * the speaker, so its OWN microphone hears it, exactly as if you'd said
      * it. Falls back to ACTION_PROCESS_TEXT (typed handoff) or a plain open
-     * when voice-command isn't supported. The reply always appears in the
-     * assistant's own UI: no public API lets Wolfman read a voice assistant's
-     * answer back, so once you hear its source, tell Wolfman via "Teach
-     * Wolfman" (prompted automatically after the handoff) so it can check
-     * that site itself next time.
+     * when voice-command isn't supported. Wolfman then listens with its own
+     * microphone for the assistant's spoken reply and records whatever it
+     * transcribes to Wolfman learning automatically — no typing required.
      */
     private fun handOff(assistant: AssistantCandidate) {
         val question = lastAskedQuestion ?: questionInput.text.toString().trim()
@@ -695,7 +700,7 @@ class MainActivity : AppCompatActivity() {
                 tts?.language = Locale.US
                 tts?.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, "wolfman-handoff")
             }, 1300)
-            Handler(Looper.getMainLooper()).postDelayed({ promptTeachWolfman() }, 9000)
+            Handler(Looper.getMainLooper()).postDelayed({ listenForAssistantReply(question) }, 6000)
             return
         }
 
@@ -716,10 +721,47 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Lets the user record WHERE the real answer was actually found (e.g. by
-     * Google or Alexa) after Wolfman's own search missed it. Only the site is
-     * remembered, never the answer text itself, so future searches on a
-     * similar question try that site first but still fetch a live result.
+     * Wolfman listens with its own microphone (real on-device STT, same as
+     * `listenForQuestion`) for the assistant's spoken reply after a handoff,
+     * and records whatever it transcribes to Wolfman learning automatically
+     * \u2014 no typing. Only the transcription is kept as a future search hint,
+     * never presented back as an answer itself.
+     */
+    private fun listenForAssistantReply(question: String) {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+        val recognizer = speechRecognizer ?: return
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+        }
+
+        recognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onResults(results: Bundle?) {
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                Handler(Looper.getMainLooper()).post {
+                    if (!text.isNullOrBlank()) {
+                        recordLearning(question, text)
+                        Toast.makeText(this@MainActivity, "Wolfman learned: \"$text\"", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            override fun onError(error: Int) {}
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+
+        runCatching { recognizer.startListening(intent) }
+    }
+
+    /**
+     * Manual fallback for teaching Wolfman a source when the automatic
+     * listen-and-capture after a handoff misses it or wasn't triggered.
      */
     private fun promptTeachWolfman() {
         val question = lastAskedQuestion
@@ -727,15 +769,15 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Ask Wolfman something first.", Toast.LENGTH_SHORT).show()
             return
         }
-        val input = EditText(this).apply { hint = "Website that had the answer, e.g. billboard.com" }
+        val input = EditText(this).apply { hint = "Website or source that had the answer" }
         AlertDialog.Builder(this)
             .setTitle("Where was \"$question\" answered?")
             .setView(input)
             .setPositiveButton("Teach") { _, _ ->
-                val domain = input.text.toString().trim()
-                if (domain.isNotEmpty()) {
-                    teachWolfman(question, domain)
-                    Toast.makeText(this, "Learned: try $domain for questions like this.", Toast.LENGTH_SHORT).show()
+                val hint = input.text.toString().trim()
+                if (hint.isNotEmpty()) {
+                    recordLearning(question, hint)
+                    Toast.makeText(this, "Learned: try \"$hint\" for questions like this.", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("Cancel", null)
