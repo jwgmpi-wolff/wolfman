@@ -89,6 +89,7 @@ class MainActivity : AppCompatActivity() {
     private var lastAskedQuestion: String? = null
     private var msalApp: ISingleAccountPublicClientApplication? = null
     private var azureAccessToken: String? = null
+    private val conversationHistory = mutableListOf<Pair<String, String>>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -390,13 +391,25 @@ class MainActivity : AppCompatActivity() {
         if (question.isEmpty()) return
         lastAskedQuestion = question
 
+        // Carries the last few turns along so a short follow-up ("yes", "try that") lands
+        // as a continuation of the same exchange instead of an unrelated new request.
+        val questionWithContext = if (conversationHistory.isEmpty()) {
+            question
+        } else {
+            buildString {
+                append("Conversation so far:\n")
+                conversationHistory.takeLast(4).forEach { (q, a) -> append("User: $q\nWolfman: $a\n") }
+                append("\nUser's follow-up: $question")
+            }
+        }
+
         responseView.text = "Asking\u2026"
         Thread {
             val attempts = mutableListOf<String>()
             var answer: String? = null
 
             for (local in detectLocalAll()) {
-                val outcome = runCatching { callLocal(local, question) }
+                val outcome = runCatching { callLocal(local, questionWithContext) }
                 val text = outcome.getOrNull()
                 if (outcome.isSuccess && text != null && !looksLikeRefusal(text)) {
                     answer = text
@@ -408,7 +421,7 @@ class MainActivity : AppCompatActivity() {
             if (answer == null) {
                 val token = freshAzureToken()
                 if (token != null) {
-                    val outcome = runCatching { callAzureMcp(token, question) }
+                    val outcome = runCatching { callAzureMcp(token, questionWithContext) }
                     val text = outcome.getOrNull()
                     if (outcome.isSuccess && text != null && !looksLikeRefusal(text)) {
                         answer = text
@@ -440,6 +453,11 @@ class MainActivity : AppCompatActivity() {
                 }
                 append("Install a local model runtime on this phone (e.g. Ollama via Termux), enter a PC daemon URL as an optional peer, ")
                 append("or ask one of the installed-assistant buttons below.")
+            }
+
+            if (answer != null) {
+                conversationHistory += question to finalText
+                while (conversationHistory.size > 4) conversationHistory.removeAt(0)
             }
 
             Handler(Looper.getMainLooper()).post {

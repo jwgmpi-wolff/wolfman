@@ -97,14 +97,17 @@ export class AzureOpenAIProvider implements Provider {
         content:
           'You have no knowledge of anything after your training cutoff and no memory of real-time ' +
           'data. For current events, prices, scores, weather, or anything that changes over time, you ' +
-          'MUST call web_search or get_stock_quote and answer only from what the tool actually returns. ' +
-          'If the tool fails or returns nothing useful, say plainly that you could not find a live answer ' +
-          '\u2014 never guess or make up a number, date, or fact.',
+          'MUST call web_search or get_stock_quote yourself and answer only from what the tool actually ' +
+          'returns \u2014 never ask the user for permission to search or offer to search, just do it. If one ' +
+          'tool or query fails, try the other tool or a rephrased query before giving up. Only after you ' +
+          'have actually tried should you say you could not find a live answer \u2014 never guess or make up ' +
+          'a number, date, or fact.',
       },
       { role: 'user', content: req.text },
     ];
 
-    for (let round = 0; round < 2; round++) {
+    const MAX_ROUNDS = 4;
+    for (let round = 0; round < MAX_ROUNDS; round++) {
       const token = await getManagedIdentityToken();
       const res = await fetch(this.chatUrl(), {
         method: 'POST',
@@ -120,7 +123,7 @@ export class AzureOpenAIProvider implements Provider {
       const message = json?.choices?.[0]?.message;
       const toolCalls: any[] | undefined = message?.tool_calls;
 
-      if (toolCalls?.length && round === 0) {
+      if (toolCalls?.length && round < MAX_ROUNDS - 1) {
         messages.push(message);
         for (const call of toolCalls) {
           const args = safeParseArgs(call.function?.arguments);
