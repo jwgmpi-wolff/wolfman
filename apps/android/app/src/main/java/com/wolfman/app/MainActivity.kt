@@ -90,6 +90,7 @@ class MainActivity : AppCompatActivity() {
     private var tts: TextToSpeech? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private var lastAskedQuestion: String? = null
+    private var pendingHandoffQuestion: String? = null
     private var msalApp: ISingleAccountPublicClientApplication? = null
     private var azureAccessToken: String? = null
     private val conversationHistory = mutableListOf<Pair<String, String>>()
@@ -107,11 +108,11 @@ class MainActivity : AppCompatActivity() {
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) {
-                if (utteranceId == "wolfman-reply") Handler(Looper.getMainLooper()).post { restartAutoListenIfEnabled() }
+                Handler(Looper.getMainLooper()).post { onTtsFinished(utteranceId) }
             }
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
-                if (utteranceId == "wolfman-reply") Handler(Looper.getMainLooper()).post { restartAutoListenIfEnabled() }
+                Handler(Looper.getMainLooper()).post { onTtsFinished(utteranceId) }
             }
         })
         if (SpeechRecognizer.isRecognitionAvailable(this)) {
@@ -232,6 +233,23 @@ class MainActivity : AppCompatActivity() {
     private fun restartAutoListenIfEnabled() {
         if (!autoListenToggle.isChecked) return
         Handler(Looper.getMainLooper()).postDelayed({ if (autoListenToggle.isChecked) listenForQuestion() }, 800)
+    }
+
+    /**
+     * Fires once Wolfman's own TTS actually finishes speaking (never on a
+     * blind timer). For a normal reply, resumes Auto-listen. For a handoff,
+     * only NOW \u2014 after Wolfman's own voice has gone silent \u2014 does it wait a
+     * further buffer for the assistant to finish its own listening and begin
+     * speaking, then starts listening for that spoken reply.
+     */
+    private fun onTtsFinished(utteranceId: String?) {
+        when (utteranceId) {
+            "wolfman-reply" -> restartAutoListenIfEnabled()
+            "wolfman-handoff" -> {
+                val question = pendingHandoffQuestion ?: return
+                Handler(Looper.getMainLooper()).postDelayed({ listenForAssistantReply(question) }, 3500)
+            }
+        }
     }
 
     /** Loads the MSAL app once; restores a cached sign-in silently if one exists. */
@@ -705,11 +723,10 @@ class MainActivity : AppCompatActivity() {
      * by your last question PLUS a request to name its source aloud through
      * the speaker, so its OWN microphone hears it, exactly as if you'd said
      * it. Falls back to ACTION_PROCESS_TEXT (typed handoff) or a plain open
-     * when voice-command isn't supported. Wolfman does NOT touch the
-     * microphone again during the handoff — grabbing it back would cut off
-     * the assistant's own listening session and it would never respond. Once
-     * you've heard its answer, tap "Teach Wolfman (listen)" to have Wolfman
-     * transcribe the source itself said.
+     * when voice-command isn't supported. Wolfman only starts listening again
+     * once its OWN voice has gone fully silent (see `onTtsFinished`) — never
+     * on a blind timer — so it can't cut off the assistant's own listening
+     * session for the question you just asked it.
      */
     private fun handOff(assistant: AssistantCandidate) {
         val question = lastAskedQuestion ?: questionInput.text.toString().trim()
@@ -718,6 +735,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         autoListenToggle.isChecked = false
+        pendingHandoffQuestion = question
 
         if (assistant.canVoiceCommand) {
             runCatching { startActivity(Intent(Intent.ACTION_VOICE_COMMAND).setPackage(assistant.packageName)) }
@@ -757,6 +775,7 @@ class MainActivity : AppCompatActivity() {
      * never presented back as an answer itself.
      */
     private fun listenForAssistantReply(question: String) {
+        pendingHandoffQuestion = null
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, "Microphone permission is needed to learn from the reply.", Toast.LENGTH_LONG).show()
             return
