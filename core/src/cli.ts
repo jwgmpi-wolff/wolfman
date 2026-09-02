@@ -21,7 +21,9 @@ import { LearningProfile } from './policy/profile.js';
 import { createNativeTts } from '../../packages/voice/src/nativeTts.js';
 import { NoLiveSourceError, type DeviceRef, type WolfRequest } from '@wolfman/protocol';
 
-const args = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+const jsonMode = rawArgs.includes('--json');
+const args = rawArgs.filter((a) => a !== '--json');
 const cmd = args[0];
 
 const device: DeviceRef = {
@@ -98,11 +100,16 @@ async function main() {
   try {
     const res = await orch.ask(req);
     process.stderr.write('\r' + ' '.repeat(60) + '\r');
-    console.log('\n' + res.text + '\n');
-    console.log('— provenance —');
-    for (const p of res.provenance)
-      console.log(`  ${p.displayName} (${p.model ?? 'n/a'}) ${p.privacyTier} ${p.latencyMs}ms @ ${p.completedAt}`);
-    for (const c of res.citations) console.log(`  source: ${c.url} (fetched ${c.fetchedAt})`);
+
+    if (jsonMode) {
+      console.log(JSON.stringify({ ok: true, text: res.text, provenance: res.provenance, citations: res.citations }));
+    } else {
+      console.log('\n' + res.text + '\n');
+      console.log('— provenance —');
+      for (const p of res.provenance)
+        console.log(`  ${p.displayName} (${p.model ?? 'n/a'}) ${p.privacyTier} ${p.latencyMs}ms @ ${p.completedAt}`);
+      for (const c of res.citations) console.log(`  source: ${c.url} (fetched ${c.fetchedAt})`);
+    }
 
     const settings = await settingsStore.load();
     if (settings.speakRepliesEnabled) {
@@ -115,6 +122,10 @@ async function main() {
   } catch (e) {
     process.stderr.write('\r' + ' '.repeat(60) + '\r');
     if (e instanceof NoLiveSourceError) {
+      if (jsonMode) {
+        console.log(JSON.stringify({ ok: false, ...e.toWire() }));
+        return;
+      }
       console.error(`\n${e.message}\n\nProviders attempted:`);
       for (const a of e.attempts) console.error(`  ✗ ${a.providerId}: ${a.reason}`);
       process.exit(2);

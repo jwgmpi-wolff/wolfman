@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Wolfman</title>
+<style>
+  /* Every state is legible with audio disabled — no cue in this file depends on sound. */
+  :root {
+    --bg: rgba(18, 18, 22, 0.92);
+    --fg: #e8e8ec;
+    --dim: #8b8b95;
+    --accent: #4c6ef5;
+    --warn: #b8860b;
+    --edge: rgba(255, 255, 255, 0.08);
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: rgba(250,250,252,0.94); --fg:#16161a; --dim:#61616b; --edge: rgba(0,0,0,0.10); }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: transparent; color: var(--fg); user-select: none;
+  }
+  .shell {
+    margin: 16px; border-radius: 16px; background: var(--bg);
+    border: 1px solid var(--edge); backdrop-filter: blur(24px);
+    box-shadow: 0 18px 48px rgba(0,0,0,.38); overflow: hidden;
+  }
+  .head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--edge); }
+  .ring { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--dim); flex: 0 0 auto; }
+  .state-label { font-weight: 600; letter-spacing: .01em; }
+  body[data-state="thinking"] .ring { border-color: var(--accent); border-top-color: transparent; animation: spin .85s linear infinite; }
+  body[data-state="error"] .ring { border-color: var(--warn); }
+  body[data-state="error"] .state-label { color: var(--warn); }
+  @keyframes spin { to { transform: rotate(360deg) } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important } }
+
+  .input-wrap {
+    margin: 14px 18px; display: flex; align-items: center; gap: 8px;
+    border: 1.5px solid var(--edge); border-radius: 11px; padding: 10px 12px;
+  }
+  input { flex: 1; background: transparent; border: 0; outline: 0; color: var(--fg); font: inherit; }
+  kbd { font-size: 11px; color: var(--dim); border: 1px solid var(--edge); border-radius: 5px; padding: 1px 5px; }
+
+  .answer { padding: 4px 18px 14px; max-height: 240px; overflow: auto; white-space: pre-wrap; user-select: text; }
+  .fail { color: var(--warn); }
+  .fail ul { margin: 6px 0 0; padding-left: 18px; }
+  .prov { padding: 10px 18px; border-top: 1px solid var(--edge); font-size: 12px; color: var(--dim); user-select: text; }
+  .prov b { color: var(--fg); font-weight: 600; }
+</style>
+</head>
+<body data-state="idle">
+  <div class="shell">
+    <div class="head">
+      <div class="ring" aria-hidden="true"></div>
+      <div class="state-label" id="label">Wolfman</div>
+    </div>
+
+    <div class="input-wrap">
+      <input id="q" placeholder="Ask Wolfman…" autofocus autocomplete="off" />
+      <kbd>Ctrl+Shift+Space</kbd>
+    </div>
+
+    <div class="answer" id="answer" role="region" aria-live="polite"></div>
+    <div class="prov" id="prov" hidden></div>
+  </div>
+
+<script type="module">
+import { invoke } from 'https://esm.sh/@tauri-apps/api/core';
+
+const $ = (id) => document.getElementById(id);
+const LABELS = { idle: 'Wolfman', thinking: 'Working', error: 'No live source' };
+
+function setState(state) {
+  document.body.dataset.state = state;
+  $('label').textContent = LABELS[state] ?? state;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+async function ask(text) {
+  setState('thinking');
+  $('answer').textContent = '';
+  $('prov').hidden = true;
+
+  // Real call every time — the CLI performs its own discovery + live provider call.
+  const result = await invoke('ask', { text });
+
+  if (!result.ok) {
+    setState('error');
+    const attempts = (result.attempts ?? []).map(a => `<li>${escapeHtml(a.providerId)}: ${escapeHtml(a.reason)}</li>`).join('');
+    $('answer').innerHTML = `<div class="fail"><b>NO_LIVE_SOURCE</b> — ${escapeHtml(result.reason ?? 'unknown')}<ul>${attempts}</ul></div>`;
+    return;
+  }
+
+  setState('idle');
+  $('answer').textContent = result.text ?? '';
+}
+
+$('q').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && $('q').value.trim()) {
+    const text = $('q').value.trim();
+    $('q').value = '';
+    void ask(text);
+  }
+  if (e.key === 'Escape') invoke('hide_overlay');
+});
+</script>
+</body>
+</html>

@@ -5,7 +5,11 @@
   "type": "module",
   "description": "Personal cross-device AI orchestrator. Discovers the AI apps already on your devices and routes every request to a live one. No mocks, no canned answers.",
   "author": "Jerry Wolff",
-  "workspaces": ["packages/*", "core", "daemon"],
+  "workspaces": [
+    "packages/*",
+    "core",
+    "daemon"
+  ],
   "scripts": {
     "build": "npm run policy:check && tsc -b packages/protocol/tsconfig.json && tsc -b tsconfig.json",
     "policy:check": "node scripts/policy-check.mjs",
@@ -16,12 +20,14 @@
     "test:integration": "node --test --test-name-pattern=@integration wolfman-dist/core/src/**/*.test.js"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
-    "@types/node": "^24.13.3"
+    "@tauri-apps/cli": "^2.11.4",
+    "@types/node": "^24.13.3",
+    "typescript": "^5.6.0"
   },
   "dependencies": {
     "bonjour-service": "^1.2.1"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }
-

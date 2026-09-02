@@ -8,8 +8,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
-dist-ssr
+/dist
+/dist-ssr
 *.local
 .env
 .env.*
@@ -21,6 +21,10 @@ apps/android/app/build/
 apps/android/local.properties
 *.iml
 .idea/
+
+# apps/windows: real Tauri/Rust project. Build output is not committed (Cargo.lock is).
+apps/windows/src-tauri/target/
+apps/windows/src-tauri/gen/
 
 # Wolfman core TypeScript build output
 wolfman-dist/
