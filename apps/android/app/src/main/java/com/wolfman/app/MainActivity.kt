@@ -11,6 +11,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.text.method.ScrollingMovementMethod
 import android.widget.Button
 import android.widget.CheckBox
@@ -82,6 +83,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusView: TextView
     private lateinit var questionInput: EditText
     private lateinit var speakRepliesToggle: CheckBox
+    private lateinit var autoListenToggle: CheckBox
     private lateinit var azureSignInButton: Button
     private lateinit var assistantButtons: LinearLayout
     private lateinit var responseView: TextView
@@ -102,6 +104,16 @@ class MainActivity : AppCompatActivity() {
         ActivityCompat.requestPermissions(this, neededPermissions.toTypedArray(), 1)
         ContextCompat.startForegroundService(this, Intent(this, WolfmanService::class.java))
         tts = TextToSpeech(this) { }
+        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) {
+                if (utteranceId == "wolfman-reply") Handler(Looper.getMainLooper()).post { restartAutoListenIfEnabled() }
+            }
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) {
+                if (utteranceId == "wolfman-reply") Handler(Looper.getMainLooper()).post { restartAutoListenIfEnabled() }
+            }
+        })
         if (SpeechRecognizer.isRecognitionAvailable(this)) {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         }
@@ -117,6 +129,7 @@ class MainActivity : AppCompatActivity() {
         val askButton = Button(this).apply { text = "Ask" }
         val speakButton = Button(this).apply { text = "\uD83C\uDFA4 Speak" }
         speakRepliesToggle = CheckBox(this).apply { text = "Speak replies aloud"; isChecked = true }
+        autoListenToggle = CheckBox(this).apply { text = "\uD83D\uDD34 Auto-listen (no tap needed)" }
         azureSignInButton = Button(this).apply { text = "Sign in to Azure" }
         val teachButton = Button(this).apply { text = "\uD83D\uDCDA Teach Wolfman (listen)" }
         assistantButtons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -130,12 +143,14 @@ class MainActivity : AppCompatActivity() {
         speakButton.setOnClickListener { listenForQuestion() }
         azureSignInButton.setOnClickListener { signInToAzure() }
         teachButton.setOnClickListener { promptTeachWolfman() }
+        autoListenToggle.setOnCheckedChangeListener { _, checked -> if (checked) listenForQuestion() }
 
         root.addView(statusView)
         root.addView(questionInput)
         root.addView(askButton)
         root.addView(speakButton)
         root.addView(speakRepliesToggle)
+        root.addView(autoListenToggle)
         root.addView(azureSignInButton)
         root.addView(teachButton)
         root.addView(assistantButtons)
@@ -156,7 +171,9 @@ class MainActivity : AppCompatActivity() {
      * Real, live, on-device speech-to-text via Android's own `SpeechRecognizer`
      * — no cloud STT call, nothing fabricated. Transcribes the spoken
      * question into the input field and immediately asks it, same as tapping
-     * "Ask" after typing.
+     * "Ask" after typing. When "Auto-listen" is checked, restarts itself
+     * after each utterance so you never have to tap Speak again — except
+     * while handing off to Google/Alexa, when it must stay off the mic.
      */
     private fun listenForQuestion() {
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -184,15 +201,20 @@ class MainActivity : AppCompatActivity() {
                 Handler(Looper.getMainLooper()).post {
                     if (text.isNullOrBlank()) {
                         Toast.makeText(this@MainActivity, "Didn't catch that \u2014 try again.", Toast.LENGTH_SHORT).show()
+                        restartAutoListenIfEnabled()
                     } else {
                         questionInput.setText(text)
                         ask()
+                        // If replies are spoken, restart happens after TTS finishes (see onCreate);
+                        // otherwise there's no speaker output to avoid overhearing, so restart now.
+                        if (!speakRepliesToggle.isChecked) restartAutoListenIfEnabled()
                     }
                 }
             }
             override fun onError(error: Int) {
                 Handler(Looper.getMainLooper()).post {
                     Toast.makeText(this@MainActivity, "Speech recognition error ($error)", Toast.LENGTH_SHORT).show()
+                    restartAutoListenIfEnabled()
                 }
             }
             override fun onBeginningOfSpeech() {}
@@ -204,6 +226,12 @@ class MainActivity : AppCompatActivity() {
         })
 
         recognizer.startListening(intent)
+    }
+
+    /** Restarts listening on its own after a short pause, only while Auto-listen stays checked. */
+    private fun restartAutoListenIfEnabled() {
+        if (!autoListenToggle.isChecked) return
+        Handler(Looper.getMainLooper()).postDelayed({ if (autoListenToggle.isChecked) listenForQuestion() }, 800)
     }
 
     /** Loads the MSAL app once; restores a cached sign-in silently if one exists. */
@@ -677,9 +705,11 @@ class MainActivity : AppCompatActivity() {
      * by your last question PLUS a request to name its source aloud through
      * the speaker, so its OWN microphone hears it, exactly as if you'd said
      * it. Falls back to ACTION_PROCESS_TEXT (typed handoff) or a plain open
-     * when voice-command isn't supported. Wolfman then listens with its own
-     * microphone for the assistant's spoken reply and records whatever it
-     * transcribes to Wolfman learning automatically — no typing required.
+     * when voice-command isn't supported. Wolfman does NOT touch the
+     * microphone again during the handoff — grabbing it back would cut off
+     * the assistant's own listening session and it would never respond. Once
+     * you've heard its answer, tap "Teach Wolfman (listen)" to have Wolfman
+     * transcribe the source itself said.
      */
     private fun handOff(assistant: AssistantCandidate) {
         val question = lastAskedQuestion ?: questionInput.text.toString().trim()
@@ -687,6 +717,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Ask Wolfman something first.", Toast.LENGTH_SHORT).show()
             return
         }
+        autoListenToggle.isChecked = false
 
         if (assistant.canVoiceCommand) {
             runCatching { startActivity(Intent(Intent.ACTION_VOICE_COMMAND).setPackage(assistant.packageName)) }
@@ -699,7 +730,6 @@ class MainActivity : AppCompatActivity() {
                 tts?.language = Locale.US
                 tts?.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, "wolfman-handoff")
             }, 1300)
-            Handler(Looper.getMainLooper()).postDelayed({ listenForAssistantReply(question) }, 6000)
             return
         }
 
