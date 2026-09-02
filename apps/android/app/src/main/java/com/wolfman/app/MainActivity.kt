@@ -1,13 +1,18 @@
 package com.wolfman.app
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.text.method.ScrollingMovementMethod
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -59,19 +64,26 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusView: TextView
     private lateinit var daemonUrlInput: EditText
     private lateinit var questionInput: EditText
+    private lateinit var speakRepliesToggle: CheckBox
     private lateinit var assistantButtons: LinearLayout
     private lateinit var responseView: TextView
     private var tts: TextToSpeech? = null
+    private var speechRecognizer: SpeechRecognizer? = null
     private var lastAskedQuestion: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val neededPermissions = mutableListOf(android.Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+            neededPermissions += android.Manifest.permission.POST_NOTIFICATIONS
         }
+        ActivityCompat.requestPermissions(this, neededPermissions.toTypedArray(), 1)
         ContextCompat.startForegroundService(this, Intent(this, WolfmanService::class.java))
         tts = TextToSpeech(this) { }
+        if (SpeechRecognizer.isRecognitionAvailable(this)) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -84,6 +96,8 @@ class MainActivity : AppCompatActivity() {
         }
         questionInput = EditText(this).apply { hint = "Ask Wolfman\u2026" }
         val askButton = Button(this).apply { text = "Ask" }
+        val speakButton = Button(this).apply { text = "\uD83C\uDFA4 Speak" }
+        speakRepliesToggle = CheckBox(this).apply { text = "Speak replies aloud"; isChecked = true }
         assistantButtons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         responseView = TextView(this).apply {
             text = "Not asked yet."
@@ -92,11 +106,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         askButton.setOnClickListener { ask() }
+        speakButton.setOnClickListener { listenForQuestion() }
 
         root.addView(statusView)
         root.addView(daemonUrlInput)
         root.addView(questionInput)
         root.addView(askButton)
+        root.addView(speakButton)
+        root.addView(speakRepliesToggle)
         root.addView(assistantButtons)
         root.addView(responseView)
 
@@ -107,7 +124,62 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         tts?.shutdown()
+        speechRecognizer?.destroy()
         super.onDestroy()
+    }
+
+    /**
+     * Real, live, on-device speech-to-text via Android's own `SpeechRecognizer`
+     * — no cloud STT call, nothing fabricated. Transcribes the spoken
+     * question into the input field and immediately asks it, same as tapping
+     * "Ask" after typing.
+     */
+    private fun listenForQuestion() {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.RECORD_AUDIO), 1)
+            Toast.makeText(this, "Microphone permission is needed to speak to Wolfman.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val recognizer = speechRecognizer
+        if (recognizer == null) {
+            Toast.makeText(this, "No speech recognizer is available on this device.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+        }
+
+        recognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                Handler(Looper.getMainLooper()).post { statusView.text = "Listening\u2026" }
+            }
+            override fun onResults(results: Bundle?) {
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                Handler(Looper.getMainLooper()).post {
+                    if (text.isNullOrBlank()) {
+                        Toast.makeText(this@MainActivity, "Didn't catch that \u2014 try again.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        questionInput.setText(text)
+                        ask()
+                    }
+                }
+            }
+            override fun onError(error: Int) {
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(this@MainActivity, "Speech recognition error ($error)", Toast.LENGTH_SHORT).show()
+                }
+            }
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+
+        recognizer.startListening(intent)
     }
 
     private fun detectLocalAsync() {
@@ -200,7 +272,13 @@ class MainActivity : AppCompatActivity() {
                 append("or ask one of the installed-assistant buttons below.")
             }
 
-            Handler(Looper.getMainLooper()).post { responseView.text = finalText }
+            Handler(Looper.getMainLooper()).post {
+                responseView.text = finalText
+                if (speakRepliesToggle.isChecked) {
+                    tts?.language = Locale.US
+                    tts?.speak(finalText, TextToSpeech.QUEUE_FLUSH, null, "wolfman-reply")
+                }
+            }
         }.start()
     }
 
