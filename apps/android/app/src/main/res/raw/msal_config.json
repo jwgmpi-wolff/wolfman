@@ -1,0 +1,14 @@
+{
+  "client_id": "502a5051-ea55-4944-957c-d4353d4764a6",
+  "authorization_user_agent": "DEFAULT",
+  "redirect_uri": "msauth://com.wolfman.app/callback",
+  "account_mode": "SINGLE",
+  "broker_redirect_uri_registered": false,
+  "authorities": [
+    {
+      "type": "AAD",
+      "authority_url": "https://login.microsoftonline.com/e594a530-1ec9-4192-a8d4-a9111f8cffa7",
+      "default": true
+    }
+  ]
+}

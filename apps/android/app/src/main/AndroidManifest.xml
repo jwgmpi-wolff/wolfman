@@ -19,6 +19,9 @@
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />
         </intent>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
         <package android:name="com.google.android.googlequicksearchbox" />
         <package android:name="com.microsoft.copilot" />
         <package android:name="com.amazon.dee.app" />
@@ -45,5 +48,19 @@
             android:name=".WolfmanService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
+
+        <activity
+            android:name="com.microsoft.identity.client.BrowserTabActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="msauth"
+                    android:host="com.wolfman.app"
+                    android:path="/callback" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

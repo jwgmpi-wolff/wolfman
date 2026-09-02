@@ -21,6 +21,16 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.microsoft.identity.client.AcquireTokenSilentParameters
+import com.microsoft.identity.client.AuthenticationCallback
+import com.microsoft.identity.client.IAccount
+import com.microsoft.identity.client.IAuthenticationResult
+import com.microsoft.identity.client.IPublicClientApplication
+import com.microsoft.identity.client.ISingleAccountPublicClientApplication
+import com.microsoft.identity.client.PublicClientApplication
+import com.microsoft.identity.client.SignInParameters
+import com.microsoft.identity.client.SilentAuthenticationCallback
+import com.microsoft.identity.client.exception.MsalException
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStreamWriter
@@ -30,6 +40,8 @@ import java.net.Socket
 import java.net.URL
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Standalone-first Wolfman client. This phone is never dependent on a PC:
@@ -52,6 +64,11 @@ import java.util.UUID
  */
 class MainActivity : AppCompatActivity() {
 
+    private companion object {
+        const val AZURE_MCP_URL = "https://wolfman-mcp.azurewebsites.net/"
+        const val AZURE_MCP_SCOPE = "api://20ed062d-2af7-4554-a27c-ce9e7bf367f2/access_as_user"
+    }
+
     private data class LocalProvider(val baseUrl: String, val kind: String, val model: String)
     private data class AssistantCandidate(val label: String, val packageName: String, val canProcessText: Boolean, val canVoiceCommand: Boolean)
 
@@ -65,11 +82,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var daemonUrlInput: EditText
     private lateinit var questionInput: EditText
     private lateinit var speakRepliesToggle: CheckBox
+    private lateinit var azureSignInButton: Button
     private lateinit var assistantButtons: LinearLayout
     private lateinit var responseView: TextView
     private var tts: TextToSpeech? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private var lastAskedQuestion: String? = null
+    private var msalApp: ISingleAccountPublicClientApplication? = null
+    private var azureAccessToken: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -84,6 +104,7 @@ class MainActivity : AppCompatActivity() {
         if (SpeechRecognizer.isRecognitionAvailable(this)) {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         }
+        initAzureSignIn()
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -98,6 +119,7 @@ class MainActivity : AppCompatActivity() {
         val askButton = Button(this).apply { text = "Ask" }
         val speakButton = Button(this).apply { text = "\uD83C\uDFA4 Speak" }
         speakRepliesToggle = CheckBox(this).apply { text = "Speak replies aloud"; isChecked = true }
+        azureSignInButton = Button(this).apply { text = "Sign in to Azure" }
         assistantButtons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         responseView = TextView(this).apply {
             text = "Not asked yet."
@@ -107,6 +129,7 @@ class MainActivity : AppCompatActivity() {
 
         askButton.setOnClickListener { ask() }
         speakButton.setOnClickListener { listenForQuestion() }
+        azureSignInButton.setOnClickListener { signInToAzure() }
 
         root.addView(statusView)
         root.addView(daemonUrlInput)
@@ -114,6 +137,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(askButton)
         root.addView(speakButton)
         root.addView(speakRepliesToggle)
+        root.addView(azureSignInButton)
         root.addView(assistantButtons)
         root.addView(responseView)
 
@@ -182,6 +206,153 @@ class MainActivity : AppCompatActivity() {
         recognizer.startListening(intent)
     }
 
+    /** Loads the MSAL app once; restores a cached sign-in silently if one exists. */
+    private fun initAzureSignIn() {
+        PublicClientApplication.createSingleAccountPublicClientApplication(
+            this,
+            R.raw.msal_config,
+            object : IPublicClientApplication.ISingleAccountApplicationCreatedListener {
+                override fun onCreated(application: ISingleAccountPublicClientApplication) {
+                    msalApp = application
+                    application.getCurrentAccountAsync(object : ISingleAccountPublicClientApplication.CurrentAccountCallback {
+                        override fun onAccountLoaded(activeAccount: IAccount?) {
+                            if (activeAccount != null) acquireTokenSilent(activeAccount)
+                        }
+                        override fun onAccountChanged(priorAccount: IAccount?, currentAccount: IAccount?) {
+                            azureAccessToken = null
+                        }
+                        override fun onError(exception: MsalException) {}
+                    })
+                }
+                override fun onError(exception: MsalException) {
+                    Handler(Looper.getMainLooper()).post {
+                        Toast.makeText(this@MainActivity, "Azure sign-in unavailable: ${exception.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
+        )
+    }
+
+    /** Interactive sign-in — needed once; afterwards tokens refresh silently. */
+    private fun signInToAzure() {
+        val app = msalApp
+        if (app == null) {
+            Toast.makeText(this, "Azure sign-in is still starting up — try again in a moment.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        app.signIn(
+            SignInParameters.builder()
+                .withActivity(this)
+                .withScopes(listOf(AZURE_MCP_SCOPE))
+                .withCallback(object : AuthenticationCallback {
+                    override fun onSuccess(authenticationResult: IAuthenticationResult) {
+                        azureAccessToken = authenticationResult.accessToken
+                        Toast.makeText(this@MainActivity, "Signed in to Azure.", Toast.LENGTH_SHORT).show()
+                    }
+                    override fun onError(exception: MsalException) {
+                        Toast.makeText(this@MainActivity, "Azure sign-in failed: ${exception.message}", Toast.LENGTH_LONG).show()
+                    }
+                    override fun onCancel() {
+                        Toast.makeText(this@MainActivity, "Azure sign-in cancelled.", Toast.LENGTH_SHORT).show()
+                    }
+                })
+                .build(),
+        )
+    }
+
+    private fun acquireTokenSilent(account: IAccount) {
+        val app = msalApp ?: return
+        app.acquireTokenSilentAsync(
+            AcquireTokenSilentParameters.Builder()
+                .withScopes(listOf(AZURE_MCP_SCOPE))
+                .forAccount(account)
+                .fromAuthority(account.authority)
+                .withCallback(object : SilentAuthenticationCallback {
+                    override fun onSuccess(authenticationResult: IAuthenticationResult) {
+                        azureAccessToken = authenticationResult.accessToken
+                    }
+                    override fun onError(exception: MsalException) {
+                        azureAccessToken = null
+                    }
+                })
+                .build(),
+        )
+    }
+
+    /** Blocks (background thread only) for a fresh silent token before an Azure MCP call. */
+    private fun freshAzureToken(): String? {
+        val app = msalApp ?: return null
+        val account = runCatching {
+            val latch = CountDownLatch(1)
+            var found: IAccount? = null
+            app.getCurrentAccountAsync(object : ISingleAccountPublicClientApplication.CurrentAccountCallback {
+                override fun onAccountLoaded(activeAccount: IAccount?) { found = activeAccount; latch.countDown() }
+                override fun onAccountChanged(priorAccount: IAccount?, currentAccount: IAccount?) { found = currentAccount; latch.countDown() }
+                override fun onError(exception: MsalException) { latch.countDown() }
+            })
+            latch.await(5, TimeUnit.SECONDS)
+            found
+        }.getOrNull() ?: return azureAccessToken
+
+        val latch = CountDownLatch(1)
+        var token = azureAccessToken
+        app.acquireTokenSilentAsync(
+            AcquireTokenSilentParameters.Builder()
+                .withScopes(listOf(AZURE_MCP_SCOPE))
+                .forAccount(account)
+                .fromAuthority(account.authority)
+                .withCallback(object : SilentAuthenticationCallback {
+                    override fun onSuccess(authenticationResult: IAuthenticationResult) {
+                        token = authenticationResult.accessToken
+                        azureAccessToken = token
+                        latch.countDown()
+                    }
+                    override fun onError(exception: MsalException) { latch.countDown() }
+                })
+                .build(),
+        )
+        latch.await(10, TimeUnit.SECONDS)
+        return token
+    }
+
+    /**
+     * Calls the hosted Wolfman MCP daemon (Azure OpenAI behind the App Service's
+     * own managed identity) over its `wolfman.ask` tool, authenticated with a
+     * real Entra ID bearer token. Same live-or-throw contract as `callDaemon`.
+     */
+    private fun callAzureMcp(token: String, question: String): String {
+        val body = JSONObject().apply {
+            put("jsonrpc", "2.0")
+            put("id", UUID.randomUUID().toString())
+            put("method", "tools/call")
+            put("params", JSONObject().apply {
+                put("name", "wolfman.ask")
+                put("arguments", JSONObject().apply { put("text", question) })
+            })
+        }
+
+        val connection = (URL(AZURE_MCP_URL).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 10_000
+            readTimeout = 90_000
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Authorization", "Bearer $token")
+        }
+        OutputStreamWriter(connection.outputStream).use { it.write(body.toString()) }
+
+        if (connection.responseCode !in 200..299) throw java.io.IOException("HTTP ${connection.responseCode}")
+
+        val raw = connection.inputStream.bufferedReader().use { it.readText() }
+        val json = JSONObject(raw)
+        json.optJSONObject("error")?.let { error -> throw java.io.IOException(error.optString("message", "Azure MCP reported an error")) }
+
+        val result = json.optJSONObject("result") ?: throw java.io.IOException("malformed Azure MCP response")
+        val content = result.optJSONArray("content")
+        val text = (0 until (content?.length() ?: 0)).joinToString("\n") { i -> content!!.getJSONObject(i).optString("text") }
+        return text.ifBlank { null } ?: throw java.io.IOException("Azure MCP returned an empty answer")
+    }
+
     private fun detectLocalAsync() {
         Thread {
             val locals = detectLocalAll()
@@ -247,6 +418,21 @@ class MainActivity : AppCompatActivity() {
                     answer = text
                 } else {
                     attempts += "PC daemon ($daemonUrl): ${outcome.exceptionOrNull()?.message ?: refusalReason(text)}"
+                }
+            }
+
+            if (answer == null) {
+                val token = freshAzureToken()
+                if (token != null) {
+                    val outcome = runCatching { callAzureMcp(token, question) }
+                    val text = outcome.getOrNull()
+                    if (outcome.isSuccess && text != null && !looksLikeRefusal(text)) {
+                        answer = text
+                    } else {
+                        attempts += "Azure MCP: ${outcome.exceptionOrNull()?.message ?: refusalReason(text)}"
+                    }
+                } else {
+                    attempts += "Azure MCP: not signed in (tap \"Sign in to Azure\")"
                 }
             }
 
