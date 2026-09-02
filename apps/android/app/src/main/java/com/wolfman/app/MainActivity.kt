@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.speech.tts.TextToSpeech
 import android.text.method.ScrollingMovementMethod
 import android.widget.Button
 import android.widget.EditText
@@ -22,6 +23,7 @@ import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -36,22 +38,31 @@ import java.util.UUID
  *
  * Closed voice assistants (Google Assistant/Gemini, Copilot, Alexa) have no
  * public API to return a text answer to a third-party app, so they are never
- * part of that automatic chain. Wolfman detects them and offers an honest
- * HANDOFF instead — it launches the assistant with your question; the
- * assistant's own reply appears in the assistant's own UI, not inside Wolfman.
+ * part of that automatic chain. Instead Wolfman detects EVERY installed one
+ * and offers a real voice handoff per assistant: it launches the assistant
+ * into its own listening state, then speaks the wake phrase + your last
+ * question aloud through the speaker so the assistant's own microphone hears
+ * it — same as if you'd said it yourself. Its reply still appears only in
+ * the assistant's own UI: no public API lets Wolfman read that answer back.
  */
 class MainActivity : AppCompatActivity() {
 
     private data class LocalProvider(val baseUrl: String, val kind: String, val model: String)
     private data class AssistantCandidate(val label: String, val packageName: String, val canProcessText: Boolean, val canVoiceCommand: Boolean)
 
+    /** Real wake phrases for known assistants — spoken aloud, never fabricated for unknown ones. */
+    private val wakePhrases = mapOf(
+        "com.google.android.googlequicksearchbox" to "Hey Google",
+        "com.amazon.dee.app" to "Alexa",
+    )
+
     private lateinit var statusView: TextView
     private lateinit var daemonUrlInput: EditText
     private lateinit var questionInput: EditText
-    private lateinit var handoffButton: Button
+    private lateinit var assistantButtons: LinearLayout
     private lateinit var responseView: TextView
-
-    private var detectedAssistant: AssistantCandidate? = null
+    private var tts: TextToSpeech? = null
+    private var lastAskedQuestion: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,6 +71,7 @@ class MainActivity : AppCompatActivity() {
             ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         }
         ContextCompat.startForegroundService(this, Intent(this, WolfmanService::class.java))
+        tts = TextToSpeech(this) { }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -72,11 +84,7 @@ class MainActivity : AppCompatActivity() {
         }
         questionInput = EditText(this).apply { hint = "Ask Wolfman\u2026" }
         val askButton = Button(this).apply { text = "Ask" }
-        handoffButton = Button(this).apply {
-            text = "Hand off to installed assistant"
-            isEnabled = false
-            setOnClickListener { handOff() }
-        }
+        assistantButtons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         responseView = TextView(this).apply {
             text = "Not asked yet."
             movementMethod = ScrollingMovementMethod()
@@ -89,7 +97,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(daemonUrlInput)
         root.addView(questionInput)
         root.addView(askButton)
-        root.addView(handoffButton)
+        root.addView(assistantButtons)
         root.addView(responseView)
 
         setContentView(ScrollView(this).apply { addView(root) })
@@ -97,17 +105,25 @@ class MainActivity : AppCompatActivity() {
         detectLocalAsync()
     }
 
+    override fun onDestroy() {
+        tts?.shutdown()
+        super.onDestroy()
+    }
+
     private fun detectLocalAsync() {
         Thread {
             val locals = detectLocalAll()
             val assistants = detectAssistants()
-            detectedAssistant = assistants.firstOrNull()
 
             Handler(Looper.getMainLooper()).post {
-                handoffButton.isEnabled = detectedAssistant != null
-                handoffButton.text = detectedAssistant?.let {
-                    if (it.canVoiceCommand) "Call ${it.label} by voice" else "Hand off to ${it.label}"
-                } ?: "No installed assistant detected"
+                assistantButtons.removeAllViews()
+                for (assistant in assistants) {
+                    val label = if (assistant.canVoiceCommand) "Ask ${assistant.label} by voice" else "Hand off to ${assistant.label}"
+                    assistantButtons.addView(Button(this).apply {
+                        text = label
+                        setOnClickListener { handOff(assistant) }
+                    })
+                }
 
                 val localLine = if (locals.isNotEmpty()) {
                     "On-device models: " + locals.joinToString(", ") { "${it.kind}@${it.baseUrl} (${it.model})" }
@@ -115,7 +131,7 @@ class MainActivity : AppCompatActivity() {
                     "On-device models: none found (install Ollama/an OpenAI-compatible runtime, e.g. via Termux)"
                 }
                 val assistantLine = if (assistants.isNotEmpty()) {
-                    "Installed assistants: ${assistants.joinToString(", ") { it.label }} (handoff only — no API returns their answer text)"
+                    "Installed assistants: ${assistants.joinToString(", ") { it.label }} (voice handoff — no API returns their answer text)"
                 } else {
                     "Installed assistants: none detected"
                 }
@@ -134,6 +150,7 @@ class MainActivity : AppCompatActivity() {
     private fun ask() {
         val question = questionInput.text.toString().trim()
         if (question.isEmpty()) return
+        lastAskedQuestion = question
 
         responseView.text = "Asking\u2026"
         Thread {
@@ -170,7 +187,7 @@ class MainActivity : AppCompatActivity() {
                     append("No on-device provider or PC daemon was configured.\n")
                 }
                 append("Install a local model runtime on this phone (e.g. Ollama via Termux), enter a PC daemon URL as an optional peer, ")
-                append("or use \"${handoffButton.text}\" below to ask an installed assistant directly.")
+                append("or ask one of the installed-assistant buttons below.")
             }
 
             Handler(Looper.getMainLooper()).post { responseView.text = finalText }
@@ -325,26 +342,44 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Transparent handoff. Prefers ACTION_VOICE_COMMAND, which launches the
-     * assistant straight into its own listening/voice-input state — voice is
-     * enabled automatically, no extra tap in the other app required. Falls back
-     * to sending the typed text via ACTION_PROCESS_TEXT, then to a plain open.
-     * Its reply always appears in ITS OWN UI: no public API lets Wolfman read
-     * a voice assistant's answer back, spoken or written.
+     * Real voice handoff, per assistant. Launches the assistant into its own
+     * listening state (ACTION_VOICE_COMMAND when supported), then — after a
+     * short warm-up delay — speaks the assistant's real wake phrase followed
+     * by your last question aloud through the speaker, so its OWN microphone
+     * hears it, exactly as if you'd said it. Falls back to ACTION_PROCESS_TEXT
+     * (typed handoff) or a plain open when voice-command isn't supported.
+     * The reply always appears in the assistant's own UI: no public API lets
+     * Wolfman read a voice assistant's answer back, spoken or written.
      */
-    private fun handOff() {
-        val assistant = detectedAssistant ?: return
-        val question = questionInput.text.toString().trim()
+    private fun handOff(assistant: AssistantCandidate) {
+        val question = lastAskedQuestion ?: questionInput.text.toString().trim()
+        if (question.isEmpty()) {
+            Toast.makeText(this, "Ask Wolfman something first.", Toast.LENGTH_SHORT).show()
+            return
+        }
 
-        val intent = when {
-            assistant.canVoiceCommand -> Intent(Intent.ACTION_VOICE_COMMAND).setPackage(assistant.packageName)
-            assistant.canProcessText && question.isNotEmpty() -> Intent(Intent.ACTION_PROCESS_TEXT).apply {
+        if (assistant.canVoiceCommand) {
+            runCatching { startActivity(Intent(Intent.ACTION_VOICE_COMMAND).setPackage(assistant.packageName)) }
+                .onFailure { Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show(); return }
+
+            val phrase = wakePhrases[assistant.packageName]
+            val utterance = if (phrase != null) "$phrase, $question" else question
+            Handler(Looper.getMainLooper()).postDelayed({
+                tts?.language = Locale.US
+                tts?.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, "wolfman-handoff")
+            }, 1300)
+            return
+        }
+
+        val intent = if (assistant.canProcessText) {
+            Intent(Intent.ACTION_PROCESS_TEXT).apply {
                 type = "text/plain"
                 setPackage(assistant.packageName)
                 putExtra(Intent.EXTRA_PROCESS_TEXT, question)
                 putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true)
             }
-            else -> Intent(Intent.ACTION_ASSIST).setPackage(assistant.packageName)
+        } else {
+            Intent(Intent.ACTION_ASSIST).setPackage(assistant.packageName)
         }
 
         runCatching { startActivity(intent) }.onFailure {
