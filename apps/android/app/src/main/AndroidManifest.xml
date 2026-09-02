@@ -26,6 +26,8 @@
     <application
         android:allowBackup="true"
         android:label="Wolfman"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.Wolfman"
         android:usesCleartextTraffic="true">
 
