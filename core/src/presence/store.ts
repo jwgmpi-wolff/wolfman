@@ -20,7 +20,9 @@ const LEGAL: Record<PresenceState, PresenceState[]> = {
   // wedges every future request behind an illegal-transition throw forever.
   rendering: ['speaking', 'idle', 'thinking', 'error'],
   speaking:  ['idle', 'thinking', 'error'],
-  error:     ['idle', 'armed'],
+  // Same reasoning as rendering/speaking above: a prior request that ended in
+  // 'error' must never permanently block every later request from starting.
+  error:     ['idle', 'armed', 'thinking'],
 };
 
 export class PresenceStore {
