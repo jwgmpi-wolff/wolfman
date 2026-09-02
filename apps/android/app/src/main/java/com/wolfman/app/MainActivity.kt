@@ -542,9 +542,56 @@ class MainActivity : AppCompatActivity() {
                 if (speakRepliesToggle.isChecked) {
                     tts?.language = Locale.US
                     tts?.speak(finalText, TextToSpeech.QUEUE_FLUSH, null, "wolfman-reply")
+                    startStopWordListener()
                 }
             }
         }.start()
+    }
+
+    /**
+     * Listens in parallel with Wolfman's own reply for a spoken "stop" \u2014
+     * no button needed. Hearing it cancels the reply immediately and starts
+     * listening for your next question right away, instead of waiting for
+     * the whole answer to finish. Keeps re-listening for "stop" for as long
+     * as Wolfman is actually still speaking.
+     */
+    private fun startStopWordListener() {
+        if (tts?.isSpeaking != true) return
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+        val recognizer = speechRecognizer ?: return
+
+        recognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onResults(results: Bundle?) {
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                Log.d(TAG, "startStopWordListener: onResults text=$text")
+                Handler(Looper.getMainLooper()).post {
+                    if (text != null && Regex("\\bstop\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
+                        tts?.stop()
+                        statusView.text = "Stopped \u2014 listening\u2026"
+                        recreateSpeechRecognizer()
+                        listenForQuestion()
+                    } else {
+                        recreateSpeechRecognizer()
+                        startStopWordListener()
+                    }
+                }
+            }
+            override fun onError(error: Int) {
+                Log.d(TAG, "startStopWordListener: onError code=$error")
+                Handler(Looper.getMainLooper()).post {
+                    recreateSpeechRecognizer()
+                    startStopWordListener()
+                }
+            }
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+        runCatching { recognizer.startListening(speechRecognizerIntent()) }
     }
 
     /** A conservative, non-exhaustive check — routing signal only, never used to alter the answer text itself. */
