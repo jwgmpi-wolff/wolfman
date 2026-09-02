@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 
 import { discover } from '../../core/src/discovery/index.js';
 import { ProviderRegistry } from '../../core/src/providers/registry.js';
@@ -195,4 +196,5 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) void main();
+// Raw string comparison breaks on Windows (backslash paths vs. a file:// URL) — compare real URLs.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) void main();

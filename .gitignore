@@ -14,32 +14,18 @@ dist-ssr
 .env
 .env.*
 
-# Android build outputs (regenerated via `npx cap sync android` + Gradle)
-android/build/
-android/app/build/
-android/.gradle/
-android/local.properties
-android/capacitor-cordova-android-plugins/build/
+# apps/android: real Gradle project. Build outputs and machine-specific SDK path are not committed.
+apps/android/.gradle/
+apps/android/.kotlin/
+apps/android/app/build/
+apps/android/local.properties
 *.iml
 .idea/
-
-# Electron-builder raw output (unpacked app, blockmaps). The final installer
-# lives in the curated releases/ folder instead, which is not ignored.
-release/
-
-# The Windows installer exceeds GitHub's 100MB file limit; publish it as a GitHub Release
-# asset instead (see releases/Wolfman-Setup-Windows.exe, built locally via `npm run dist:windows`).
-releases/*.exe
-
-# azd local environment state (never committed; secrets live only here locally)
-functions/.azure/
 
 # Wolfman core TypeScript build output
 wolfman-dist/
 packages/protocol/dist/
 *.tsbuildinfo
-
-!.env.example
 
 # Editor directories and files
 .vscode/*
