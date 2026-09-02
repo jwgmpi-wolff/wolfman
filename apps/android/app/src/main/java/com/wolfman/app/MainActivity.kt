@@ -1,6 +1,5 @@
 package com.wolfman.app
 
-import android.app.AlertDialog
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -119,7 +118,7 @@ class MainActivity : AppCompatActivity() {
         val speakButton = Button(this).apply { text = "\uD83C\uDFA4 Speak" }
         speakRepliesToggle = CheckBox(this).apply { text = "Speak replies aloud"; isChecked = true }
         azureSignInButton = Button(this).apply { text = "Sign in to Azure" }
-        val teachButton = Button(this).apply { text = "\uD83D\uDCDA Teach Wolfman" }
+        val teachButton = Button(this).apply { text = "\uD83D\uDCDA Teach Wolfman (listen)" }
         assistantButtons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         responseView = TextView(this).apply {
             text = "Not asked yet."
@@ -724,30 +723,44 @@ class MainActivity : AppCompatActivity() {
      * Wolfman listens with its own microphone (real on-device STT, same as
      * `listenForQuestion`) for the assistant's spoken reply after a handoff,
      * and records whatever it transcribes to Wolfman learning automatically
-     * \u2014 no typing. Only the transcription is kept as a future search hint,
+     * — no typing. Only the transcription is kept as a future search hint,
      * never presented back as an answer itself.
      */
     private fun listenForAssistantReply(question: String) {
-        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
-        val recognizer = speechRecognizer ?: return
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Microphone permission is needed to learn from the reply.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val recognizer = speechRecognizer
+        if (recognizer == null) {
+            Toast.makeText(this, "No speech recognizer is available on this device.", Toast.LENGTH_LONG).show()
+            return
+        }
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
         }
 
+        Toast.makeText(this, "Wolfman is listening for the reply\u2026", Toast.LENGTH_SHORT).show()
         recognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
             override fun onResults(results: Bundle?) {
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
                 Handler(Looper.getMainLooper()).post {
                     if (!text.isNullOrBlank()) {
                         recordLearning(question, text)
                         Toast.makeText(this@MainActivity, "Wolfman learned: \"$text\"", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "Didn't catch a reply to learn from.", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
-            override fun onError(error: Int) {}
-            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onError(error: Int) {
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(this@MainActivity, "Didn't catch a reply to learn from (error $error).", Toast.LENGTH_SHORT).show()
+                }
+            }
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
@@ -760,8 +773,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Manual fallback for teaching Wolfman a source when the automatic
-     * listen-and-capture after a handoff misses it or wasn't triggered.
+     * Manual "Teach Wolfman" trigger \u2014 always by listening and transcribing,
+     * never by typing. Say (or repeat) where the answer came from and Wolfman
+     * records that transcript as a future search hint for this question.
      */
     private fun promptTeachWolfman() {
         val question = lastAskedQuestion
@@ -769,19 +783,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Ask Wolfman something first.", Toast.LENGTH_SHORT).show()
             return
         }
-        val input = EditText(this).apply { hint = "Website or source that had the answer" }
-        AlertDialog.Builder(this)
-            .setTitle("Where was \"$question\" answered?")
-            .setView(input)
-            .setPositiveButton("Teach") { _, _ ->
-                val hint = input.text.toString().trim()
-                if (hint.isNotEmpty()) {
-                    recordLearning(question, hint)
-                    Toast.makeText(this, "Learned: try \"$hint\" for questions like this.", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        listenForAssistantReply(question)
     }
 }
 
