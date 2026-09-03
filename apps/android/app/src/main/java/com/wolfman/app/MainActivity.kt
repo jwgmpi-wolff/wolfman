@@ -103,6 +103,8 @@ class MainActivity : AppCompatActivity() {
     private var pendingHandoffQuestion: String? = null
     private var pendingSequentialHandoff: (() -> Unit)? = null
     private var detectedAssistants: List<AssistantCandidate> = emptyList()
+    private var resumeWakeWordAfterHandoff = false
+    private var resumeAutoListenAfterHandoff = false
     private var msalApp: ISingleAccountPublicClientApplication? = null
     private var azureAccessToken: String? = null
     private val conversationHistory = mutableListOf<Pair<String, String>>()
@@ -462,9 +464,9 @@ class MainActivity : AppCompatActivity() {
                 if (seqCallback != null) {
                     pendingHandoffQuestion = null
                     // No reply-capture here — give the assistant real time to actually finish
-                    // speaking its own answer aloud (8s cut off Google mid-reply in testing)
-                    // before Wolfman moves on to the next one in the sequence.
-                    Handler(Looper.getMainLooper()).postDelayed(seqCallback, 16000)
+                    // speaking its own answer aloud (8s, then 16s, both still cut Google off
+                    // mid-reply in testing) before Wolfman moves on to the next one.
+                    Handler(Looper.getMainLooper()).postDelayed(seqCallback, 26000)
                 } else {
                     Handler(Looper.getMainLooper()).postDelayed({ listenForAssistantReply(question) }, 3500)
                 }
@@ -631,7 +633,7 @@ class MainActivity : AppCompatActivity() {
                     val label = if (assistant.canVoiceCommand) "Ask ${assistant.label} by voice" else "Hand off to ${assistant.label}"
                     assistantButtons.addView(Button(this).apply {
                         text = label
-                        setOnClickListener { handOff(assistant) }
+                        setOnClickListener { rememberListeningStateBeforeHandoff(); handOff(assistant) }
                     })
                 }
 
@@ -1036,14 +1038,35 @@ class MainActivity : AppCompatActivity() {
         val candidates = order.mapNotNull { pkg -> detectedAssistants.firstOrNull { it.packageName == pkg } }
         if (candidates.isEmpty()) return
         Log.d(TAG, "autoHandOffToAssistants: sequence=${candidates.map { it.label }}")
+        rememberListeningStateBeforeHandoff()
         autoHandOffStep(question, candidates, 0)
     }
 
     private fun autoHandOffStep(question: String, candidates: List<AssistantCandidate>, index: Int) {
-        if (index >= candidates.size) return
+        if (index >= candidates.size) { restoreListeningAfterHandoff(); return }
         val assistant = candidates[index]
         statusView.text = "Wolfman doesn't know \u2014 asking ${assistant.label}\u2026"
         handOff(assistant, questionOverride = question) { autoHandOffStep(question, candidates, index + 1) }
+    }
+
+    /**
+     * handOff() force-disables both listening toggles for its duration (so it doesn't fight
+     * the assistant for the mic) — these remember what was actually on beforehand so it can
+     * resume once the handoff (single or the whole auto-fallback sequence) truly finishes,
+     * instead of silently leaving Wolfman deaf to every request after.
+     */
+    private fun rememberListeningStateBeforeHandoff() {
+        resumeWakeWordAfterHandoff = wakeWordToggle.isChecked
+        resumeAutoListenAfterHandoff = autoListenToggle.isChecked
+    }
+
+    private fun restoreListeningAfterHandoff() {
+        val wake = resumeWakeWordAfterHandoff
+        val auto = resumeAutoListenAfterHandoff
+        resumeWakeWordAfterHandoff = false
+        resumeAutoListenAfterHandoff = false
+        if (wake) wakeWordToggle.isChecked = true
+        else if (auto) autoListenToggle.isChecked = true
     }
 
     /**
@@ -1102,7 +1125,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         runCatching { startActivity(intent) }
-            .onSuccess { then?.let { cb -> Handler(Looper.getMainLooper()).postDelayed(cb, 16000) } }
+            .onSuccess { then?.let { cb -> Handler(Looper.getMainLooper()).postDelayed(cb, 26000) } }
             .onFailure {
                 Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show()
                 then?.invoke()
@@ -1146,6 +1169,7 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "listenForAssistantReply: onResults text=$text")
                 Handler(Looper.getMainLooper()).post {
                     orbView.setState(OrbState.IDLE)
+                    restoreListeningAfterHandoff()
                     if (!text.isNullOrBlank()) {
                         recordLearning(question, text)
                         Toast.makeText(this@MainActivity, "Wolfman learned: \"$text\"", Toast.LENGTH_LONG).show()
@@ -1159,6 +1183,7 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "listenForAssistantReply: onError code=$error")
                 Handler(Looper.getMainLooper()).post {
                     orbView.setState(OrbState.IDLE)
+                    restoreListeningAfterHandoff()
                     Toast.makeText(this@MainActivity, "Didn't catch a reply to learn from (error $error).", Toast.LENGTH_SHORT).show()
                 }
             }
