@@ -63,6 +63,9 @@ fn user_environment_value(name: &str) -> Option<String> {
 fn wolfman_node_command(cli: &PathBuf) -> Command {
     let mut command = Command::new("node");
     command.arg(cli);
+    if let Some(root) = cli.parent().and_then(|path| path.parent()).and_then(|path| path.parent()) {
+        command.current_dir(root);
+    }
     for name in ["WOLFMAN_M365_CLIENT_ID", "WOLFMAN_M365_TENANT_ID"] {
         if let Some(value) = user_environment_value(name) {
             command.env(name, value);
@@ -100,6 +103,14 @@ fn ask(app: AppHandle, text: String) -> AskResult {
 
     match output {
         Ok(out) => {
+            if !out.status.success() {
+                return AskResult {
+                    ok: false,
+                    text: None,
+                    reason: Some(format!("Wolfman provider process exited with {}", out.status)),
+                    attempts: None,
+                };
+            }
             let stdout = String::from_utf8_lossy(&out.stdout);
             match serde_json::from_str::<serde_json::Value>(stdout.trim()) {
                 Ok(json) => AskResult {
@@ -127,6 +138,9 @@ fn run_cli_json(app: &AppHandle, args: &[&str]) -> Result<serde_json::Value, Str
         .args(args)
         .output()
         .map_err(|error| format!("could not run the CLI: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("Wolfman provider process exited with {}", output.status));
+    }
     serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("CLI produced no parseable output: {error}"))
 }
