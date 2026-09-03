@@ -87,6 +87,13 @@ class MainActivity : AppCompatActivity() {
         "com.amazon.dee.app" to "Alexa",
     )
 
+    private fun assistantName(packageName: String, detectedName: String): String = when (packageName) {
+        "com.google.android.googlequicksearchbox" -> "Gemini"
+        "com.microsoft.copilot" -> "Copilot"
+        "com.amazon.dee.app" -> "Alexa"
+        else -> detectedName
+    }
+
     private lateinit var statusView: TextView
     private lateinit var questionInput: EditText
     private lateinit var orbView: OrbView
@@ -711,7 +718,9 @@ class MainActivity : AppCompatActivity() {
     private fun detectLocalAsync() {
         Thread {
             val locals = detectLocalAll()
-            val assistants = detectAssistants()
+            val assistants = detectAssistants().map { assistant ->
+                assistant.copy(label = assistantName(assistant.packageName, assistant.label))
+            }
             detectedAssistants = assistants
 
             Handler(Looper.getMainLooper()).post {
@@ -762,6 +771,9 @@ class MainActivity : AppCompatActivity() {
                 add(ProviderChoice("azure", "Azure MCP"))
                 add(ProviderChoice("web", "Web search"))
             }
+            detectedAssistants.forEach { assistant ->
+                add(ProviderChoice("assistant:${assistant.packageName}", "${assistant.label} (handoff)"))
+            }
         }
         val labels = providerChoices.map(ProviderChoice::label)
         val prefs = routingPrefs()
@@ -790,28 +802,41 @@ class MainActivity : AppCompatActivity() {
             .apply()
     }
 
-    private fun providerAttempts(locals: List<LocalProvider>, question: String): List<ProviderAttempt> {
+    private fun routeIds(locals: List<LocalProvider>): List<String> {
         val prefs = routingPrefs()
         val cloudAllowed = prefs.getString("accessMode", "Device") == "Cloud"
-        val localAttempts = locals.map { local ->
-            ProviderAttempt("local:${local.baseUrl}", "${local.kind}@${local.baseUrl}") { callLocal(local, question) }
-        }
-        val available = buildList {
-            addAll(localAttempts)
+        val available = buildList<String> {
+            locals.forEach { add("local:${it.baseUrl}") }
             if (cloudAllowed) {
-                add(ProviderAttempt("azure", "Azure MCP") {
-                    val token = freshAzureToken() ?: throw java.io.IOException("not signed in (tap Sign in to Azure)")
-                    callAzureMcp(token, question)
-                })
-                add(ProviderAttempt("web", "Web search (DuckDuckGo)") { searchWeb(question) })
+                add("azure")
+                add("web")
             }
+            detectedAssistants.forEach { add("assistant:${it.packageName}") }
         }
         val preferredIds = listOf(prefs.getString("primary", "auto"), prefs.getString("next", "auto"))
             .filterNotNull().filter { it != "auto" }.distinct()
-        val ordered = preferredIds.mapNotNull { id -> available.firstOrNull { it.id == id } } +
-            available.filter { candidate -> candidate.id !in preferredIds }
+        val ordered = preferredIds.filter { it in available } + available.filter { it !in preferredIds }
         return ordered.take(when (prefs.getString("pollDepth", "All")) { "1" -> 1; "2" -> 2; else -> ordered.size })
     }
+
+    private fun providerAttempts(locals: List<LocalProvider>, question: String): List<ProviderAttempt> =
+        routeIds(locals).takeWhile { !it.startsWith("assistant:") }.mapNotNull { id -> when {
+            id.startsWith("local:") -> locals.firstOrNull { "local:${it.baseUrl}" == id }?.let { local ->
+                ProviderAttempt(id, "${local.kind}@${local.baseUrl}") { callLocal(local, question) }
+            }
+            id == "azure" -> ProviderAttempt(id, "Azure MCP") {
+                val token = freshAzureToken() ?: throw java.io.IOException("not signed in (tap Sign in to Azure)")
+                callAzureMcp(token, question)
+            }
+            id == "web" -> ProviderAttempt(id, "Web search (DuckDuckGo)") { searchWeb(question) }
+            else -> null
+        } }
+
+    private fun selectedAssistantHandoffs(locals: List<LocalProvider>): List<AssistantCandidate> =
+        routeIds(locals).mapNotNull { id ->
+            id.removePrefix("assistant:").takeIf { id.startsWith("assistant:") }
+                ?.let { packageName -> detectedAssistants.firstOrNull { it.packageName == packageName } }
+        }
 
     /**
      * Polls the ranked list of real, live providers one at a time: local
@@ -842,8 +867,9 @@ class MainActivity : AppCompatActivity() {
         Thread {
             val attempts = mutableListOf<String>()
             var answer: String? = null
+            val locals = detectLocalAll()
 
-            for (provider in providerAttempts(detectLocalAll(), questionWithContext)) {
+            for (provider in providerAttempts(locals, questionWithContext)) {
                 val outcome = runCatching { provider.run() }
                 val text = outcome.getOrNull()
                 if (outcome.isSuccess && text != null && !looksLikeRefusal(text)) {
@@ -874,7 +900,7 @@ class MainActivity : AppCompatActivity() {
                 responseView.text = finalText
                 if (answer == null) {
                     orbView.setState(OrbState.IDLE)
-                    autoHandOffToAssistants(question)
+                    handOffSelectedAssistants(question, selectedAssistantHandoffs(locals))
                 } else if (speakRepliesToggle.isChecked) {
                     orbView.setState(OrbState.SPEAKING)
                     tts?.language = Locale.US
@@ -1169,11 +1195,9 @@ class MainActivity : AppCompatActivity() {
      * doesn't try to capture or read it back, it just gives it time to reply before moving
      * on to the next one in the sequence.
      */
-    private fun autoHandOffToAssistants(question: String) {
-        val order = listOf("com.google.android.googlequicksearchbox", "com.amazon.dee.app")
-        val candidates = order.mapNotNull { pkg -> detectedAssistants.firstOrNull { it.packageName == pkg } }
+    private fun handOffSelectedAssistants(question: String, candidates: List<AssistantCandidate>) {
         if (candidates.isEmpty()) return
-        Log.d(TAG, "autoHandOffToAssistants: sequence=${candidates.map { it.label }}")
+        Log.d(TAG, "handOffSelectedAssistants: sequence=${candidates.map { it.label }}")
         rememberListeningStateBeforeHandoff()
         autoHandOffStep(question, candidates, 0)
     }
