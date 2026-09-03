@@ -103,7 +103,9 @@ fn open_overlay(app: &AppHandle) {
     }
     let _ = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay.html".into()))
         .title("Wolfman")
-        .inner_size(720.0, 460.0)
+        .inner_size(1040.0, 680.0)
+        .min_inner_size(760.0, 480.0)
+        .resizable(true)
         .decorations(false)
         .transparent(true)
         .always_on_top(true)
@@ -168,7 +170,7 @@ fn run_cli_json(app: &AppHandle, args: &[&str]) -> Result<serde_json::Value, Str
 
 #[tauri::command]
 fn providers(app: AppHandle) -> Result<serde_json::Value, String> {
-    run_cli_json(&app, &["providers"])
+    run_cli_json(&app, &["providers", "--options"])
 }
 
 #[tauri::command]

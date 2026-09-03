@@ -78,6 +78,20 @@ async function boot() {
   return { registry, candidates, report };
 }
 
+async function providerOptions() {
+  const registry = new ProviderRegistry();
+  const candidates = await discover(device);
+  const report = await registry.registerAll(candidates, device);
+  const options = report.registered.map((provider) => ({
+    id: provider.id,
+    displayName: provider.displayName,
+  }));
+  if (process.env.WOLFMAN_M365_CLIENT_ID && process.env.WOLFMAN_M365_TENANT_ID) {
+    options.push({ id: 'microsoft-365-copilot@graph', displayName: 'Microsoft 365 Copilot' });
+  }
+  return { options, settings: await new SettingsStore(path.join(os.homedir(), '.wolfman', 'settings.json')).load() };
+}
+
 async function main() {
   const settingsFile = path.join(os.homedir(), '.wolfman', 'settings.json');
 
@@ -125,6 +139,10 @@ async function main() {
   }
 
   if (cmd === 'providers') {
+    if (args[1] === '--options') {
+      console.log(JSON.stringify(await providerOptions()));
+      return;
+    }
     const { candidates, report } = await boot();
     const settings = await new SettingsStore(settingsFile).load();
     console.log(JSON.stringify({ candidates, ...report, settings }));
