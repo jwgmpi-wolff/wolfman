@@ -242,6 +242,14 @@ class MainActivity : AppCompatActivity() {
         return remainder?.takeIf { it.isNotBlank() } ?: text
     }
 
+    /** Error 11 (SERVER_DISCONNECTED) means the on-device speech service itself crashed — no app
+     * can force-restart another app's process, so the only real fix is a phone reboot. Naming
+     * that plainly beats a bare error code the user has no way to act on. */
+    private fun speechErrorMessage(error: Int): String = when (error) {
+        11 -> "Speech service disconnected \u2014 try rebooting your phone if this keeps happening."
+        else -> "Speech recognition error ($error)"
+    }
+
     private fun listenForQuestion() {
         Log.d(TAG, "listenForQuestion() called")
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -296,7 +304,7 @@ class MainActivity : AppCompatActivity() {
                 if (myGen != recognizerGeneration) { Log.d(TAG, "listenForQuestion: onError ignored, superseded session"); return }
                 Log.d(TAG, "listenForQuestion: onError code=$error")
                 Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(this@MainActivity, "Speech recognition error ($error)", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, speechErrorMessage(error), Toast.LENGTH_LONG).show()
                     resumeIdleListening()
                 }
             }
