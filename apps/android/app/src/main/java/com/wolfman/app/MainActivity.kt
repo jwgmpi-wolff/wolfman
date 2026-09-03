@@ -149,8 +149,8 @@ class MainActivity : AppCompatActivity() {
         val askButton = Button(this).apply { text = "Ask" }
         val speakButton = Button(this).apply { text = "\uD83C\uDFA4 Speak" }
         speakRepliesToggle = CheckBox(this).apply { text = "Speak replies aloud"; isChecked = true }
-        autoListenToggle = CheckBox(this).apply { text = "\uD83D\uDD34 Auto-listen (no tap needed)" }
-        wakeWordToggle = CheckBox(this).apply { text = "\uD83D\uDC42 Always listen for \"Hey Wolfman\""; isChecked = true }
+        autoListenToggle = CheckBox(this).apply { text = "\uD83D\uDD34 Auto-listen (no tap needed)"; isChecked = true }
+        wakeWordToggle = CheckBox(this).apply { text = "\uD83D\uDC42 Always listen for \"Hey Wolfman\"" }
         azureSignInButton = Button(this).apply { text = "Sign in to Azure" }
         val teachButton = Button(this).apply { text = "\uD83D\uDCDA Teach Wolfman (listen)" }
         assistantButtons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -174,7 +174,7 @@ class MainActivity : AppCompatActivity() {
         }
         // Checkbox defaults to on, but setting isChecked above ran before this listener was
         // attached, so it never fired for that initial value — start the loop explicitly.
-        if (wakeWordToggle.isChecked) startWakeWordListening()
+        if (autoListenToggle.isChecked) listenForQuestion()
 
         root.addView(statusView)
         root.addView(questionInput)
@@ -213,9 +213,11 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         val micIndex = permissions.indexOf(android.Manifest.permission.RECORD_AUDIO)
         val micGranted = micIndex != -1 && grantResults.getOrNull(micIndex) == PackageManager.PERMISSION_GRANTED
-        // Mic permission is requested asynchronously at launch, so "Hey Wolfman" defaulting to on
-        // couldn't actually start listening until the user answers this dialog — kick it off now.
-        if (micGranted && wakeWordToggle.isChecked) startWakeWordListening()
+        // Mic permission is requested asynchronously at launch, so a default-on listening mode
+        // couldn't actually start until the user answers this dialog — kick it off now.
+        if (!micGranted) return
+        if (autoListenToggle.isChecked) listenForQuestion()
+        else if (wakeWordToggle.isChecked) startWakeWordListening()
     }
 
     override fun onDestroy() {
