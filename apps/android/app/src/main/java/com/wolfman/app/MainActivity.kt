@@ -438,7 +438,8 @@ class MainActivity : AppCompatActivity() {
         val recognizer = speechRecognizer ?: return
         val myGen = ++recognizerGeneration
 
-        fun wakeWordSaid(text: String?) = text != null && Regex("(?i)\\bhey\\s+wolf\\s*man\\b").containsMatchIn(text)
+        fun wakeWordSaid(text: String?) = text != null && Regex("(?i)^\\s*hey\\s+wolf\\s*man(?:\\b|[,.!?])").containsMatchIn(text)
+        fun exactWakeWord(text: String?) = text != null && Regex("(?i)^\\s*hey\\s+wolf\\s*man\\s*[.!?]*\\s*$").matches(text)
         var handled = false
         fun wake(text: String?) {
             if (handled) return
@@ -465,11 +466,14 @@ class MainActivity : AppCompatActivity() {
 
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
-            // Deliberately does NOT act on the wake word here: tearing down this live
-            // session mid-utterance is exactly what discarded the rest of the sentence
-            // when the question was said in the same breath as "Hey Wolfman". Only the
-            // final onResults (after the recognizer's own end-of-speech) acts on it.
-            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onPartialResults(partialResults: Bundle?) {
+                if (myGen != recognizerGeneration || handled) return
+                val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                // Android often never issues a final result for a short wake-only phrase.
+                // Only act here when the partial is exactly the wake phrase; same-breath
+                // questions still wait for the final result so their words are retained.
+                if (exactWakeWord(text)) wake(text)
+            }
             override fun onResults(results: Bundle?) {
                 if (myGen != recognizerGeneration) { Log.d(TAG, "startWakeWordListening: onResults ignored, superseded session"); return }
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
