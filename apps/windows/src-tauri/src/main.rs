@@ -148,8 +148,14 @@ fn ask(app: AppHandle, text: String) -> AskResult {
     let output = wolfman_node_command(&cli).arg("--json").arg(&text).output();
 
     match output {
-        Ok(out) => {
+        Ok(mut out) => {
             if !out.status.success() {
+                if let Ok(retry) = wolfman_node_command(&cli).arg("--json").arg(&text).output() {
+                    out = retry;
+                }
+            }
+            if !out.status.success() {
+                write_provider_diagnostic(&app, &out);
                 return AskResult {
                     ok: false,
                     text: None,
