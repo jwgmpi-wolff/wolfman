@@ -126,6 +126,8 @@ class MainActivity : AppCompatActivity() {
     private var providerChoices: List<ProviderChoice> = emptyList()
     private var updatingProviderPickers = false
 
+    private fun voicePrefs(): SharedPreferences = getSharedPreferences("wolfman_voice", MODE_PRIVATE)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -166,8 +168,14 @@ class MainActivity : AppCompatActivity() {
         val askButton = Button(this).apply { text = "Ask" }
         val speakButton = Button(this).apply { text = "\uD83C\uDFA4 Speak" }
         speakRepliesToggle = CheckBox(this).apply { text = "Speak replies aloud"; isChecked = true }
-        autoListenToggle = CheckBox(this).apply { text = "\uD83D\uDD34 Auto-listen (no tap needed)"; isChecked = true }
-        wakeWordToggle = CheckBox(this).apply { text = "\uD83D\uDC42 Always listen for \"Hey Wolfman\"" }
+        autoListenToggle = CheckBox(this).apply {
+            text = "Continuous listening"
+            isChecked = voicePrefs().getBoolean("continuousListening", false)
+        }
+        wakeWordToggle = CheckBox(this).apply {
+            text = "Wake listener: \"Hey Wolfman\""
+            isChecked = voicePrefs().getBoolean("wakeListening", !autoListenToggle.isChecked)
+        }
         azureSignInButton = Button(this).apply { text = "Sign in to Azure" }
         primaryProviderPicker = Spinner(this)
         nextProviderPicker = Spinner(this)
@@ -199,15 +207,29 @@ class MainActivity : AppCompatActivity() {
         teachButton.setOnClickListener { promptTeachWolfman() }
         autoListenToggle.setOnCheckedChangeListener { _, checked ->
             Log.d(TAG, "autoListenToggle checked=$checked")
-            if (checked) { wakeWordToggle.isChecked = false; listenForQuestion() }
+            voicePrefs().edit().putBoolean("continuousListening", checked).apply()
+            if (checked) {
+                wakeWordToggle.isChecked = false
+                listenForQuestion()
+            } else if (!wakeWordToggle.isChecked) {
+                stopListening()
+            }
         }
         wakeWordToggle.setOnCheckedChangeListener { _, checked ->
             Log.d(TAG, "wakeWordToggle checked=$checked")
-            if (checked) { autoListenToggle.isChecked = false; startWakeWordListening() }
+            voicePrefs().edit().putBoolean("wakeListening", checked).apply()
+            if (checked) {
+                autoListenToggle.isChecked = false
+                startWakeWordListening()
+            } else if (!autoListenToggle.isChecked) {
+                stopListening()
+                statusView.text = "Wake listener asleep"
+                orbView.setState(OrbState.IDLE)
+            }
         }
-        // Checkbox defaults to on, but setting isChecked above ran before this listener was
-        // attached, so it never fired for that initial value — start the loop explicitly.
+        // Only the strict wake-word gate starts by default; continuous capture is opt-in.
         if (autoListenToggle.isChecked) listenForQuestion()
+        else if (wakeWordToggle.isChecked) startWakeWordListening()
 
         root.addView(statusView)
         root.addView(questionInput)
@@ -256,8 +278,8 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         val micIndex = permissions.indexOf(android.Manifest.permission.RECORD_AUDIO)
         val micGranted = micIndex != -1 && grantResults.getOrNull(micIndex) == PackageManager.PERMISSION_GRANTED
-        // Mic permission is requested asynchronously at launch, so a default-on listening mode
-        // couldn't actually start until the user answers this dialog — kick it off now.
+        // Mic permission is requested asynchronously at launch, so the selected listening mode
+        // cannot start until the user answers this dialog.
         if (!micGranted) return
         if (autoListenToggle.isChecked) listenForQuestion()
         else if (wakeWordToggle.isChecked) startWakeWordListening()
@@ -416,7 +438,7 @@ class MainActivity : AppCompatActivity() {
         val recognizer = speechRecognizer ?: return
         val myGen = ++recognizerGeneration
 
-        fun wakeWordSaid(text: String?) = text != null && Regex("(?i)hey\\s*wolf\\s*man|\\bwolfman\\b").containsMatchIn(text)
+        fun wakeWordSaid(text: String?) = text != null && Regex("(?i)\\bhey\\s+wolf\\s*man\\b").containsMatchIn(text)
         var handled = false
         fun wake(text: String?) {
             if (handled) return
@@ -481,6 +503,13 @@ class MainActivity : AppCompatActivity() {
     private fun recreateSpeechRecognizer() {
         speechRecognizer?.destroy()
         speechRecognizer = if (SpeechRecognizer.isRecognitionAvailable(this)) SpeechRecognizer.createSpeechRecognizer(this) else null
+    }
+
+    private fun stopListening() {
+        recognizerGeneration++
+        speechRecognizer?.cancel()
+        speechRecognizer?.destroy()
+        speechRecognizer = null
     }
 
     /** Longer silence timeouts than Android's defaults, so a normal pause mid-question doesn't cut listening off early. */

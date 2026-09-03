@@ -10,7 +10,7 @@ SHA-256: `0EB565AB31BCC9E3C0B80301595EBEA9AC032AA81FD5B6A6ABB9DB9B61EEDDBD`
 
 `wolfman-android-debug.apk` — debug build of the standalone Android app, rebuilt and pushed here manually after each notable change (not automated).
 
-SHA-256: `69EB66D5CB011971D52672BA372D6D7108330773DA4460204083267AD7CAD71A`
+SHA-256: `3DB3BBCB1329768117E6B03E71C7C58D420D04260516D7FBF1144FCE45DA3908`
 
 ## Install on another device
 
