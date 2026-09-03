@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, rmSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 
 const runtime = path.resolve('apps/windows/runtime');
@@ -8,7 +8,9 @@ if (!existsSync(keytarBinary)) {
   process.exit(1);
 }
 
-rmSync(path.join(runtime, 'node_modules', '.bin'), { recursive: true, force: true });
+const binDir = path.join(runtime, 'node_modules', '.bin');
+if (existsSync(binDir) && lstatSync(binDir).isSymbolicLink()) unlinkSync(binDir);
+else rmSync(binDir, { recursive: true, force: true });
 const resources = path.resolve('apps/windows/src-tauri/resources');
 rmSync(resources, { recursive: true, force: true });
 mkdirSync(path.join(resources, 'node_modules', '@wolfman', 'protocol'), { recursive: true });

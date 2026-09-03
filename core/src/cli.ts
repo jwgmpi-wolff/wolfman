@@ -67,7 +67,7 @@ async function boot() {
     const { Microsoft365CopilotProvider } = await import('../../packages/m365-copilot/src/index.js');
     const descriptor = await registry.registerDirect(
       new Microsoft365CopilotProvider(device, await loadMicrosoftAuthRecord()),
-      120000,
+      10000,
     );
     if (descriptor.lastProbe?.status === 'available') {
       report.registered.push(descriptor);
@@ -210,4 +210,9 @@ async function main() {
   }
 }
 
-void main();
+void main()
+  .then(() => process.exit(0))
+  .catch((error: unknown) => {
+    console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+    process.exit(1);
+  });
