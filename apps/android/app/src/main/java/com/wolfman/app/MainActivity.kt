@@ -439,8 +439,8 @@ class MainActivity : AppCompatActivity() {
         val myGen = ++recognizerGeneration
 
         fun wakeWordSaid(text: String?) = text != null && Regex("(?i)^\\s*hey\\s+wolf\\s*man(?:\\b|[,.!?])").containsMatchIn(text)
-        fun exactWakeWord(text: String?) = text != null && Regex("(?i)^\\s*hey\\s+wolf\\s*man\\s*[.!?]*\\s*$").matches(text)
         var handled = false
+        var lastPartialText: String? = null
         fun wake(text: String?) {
             if (handled) return
             handled = true
@@ -469,10 +469,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPartialResults(partialResults: Bundle?) {
                 if (myGen != recognizerGeneration || handled) return
                 val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                // Android often never issues a final result for a short wake-only phrase.
-                // Only act here when the partial is exactly the wake phrase; same-breath
-                // questions still wait for the final result so their words are retained.
-                if (exactWakeWord(text)) wake(text)
+                if (!text.isNullOrBlank()) lastPartialText = text
             }
             override fun onResults(results: Bundle?) {
                 if (myGen != recognizerGeneration) { Log.d(TAG, "startWakeWordListening: onResults ignored, superseded session"); return }
@@ -490,6 +487,10 @@ class MainActivity : AppCompatActivity() {
                 if (myGen != recognizerGeneration) { Log.d(TAG, "startWakeWordListening: onError ignored, superseded session"); return }
                 Log.d(TAG, "startWakeWordListening: onError code=$error handled=$handled")
                 if (handled) return
+                // Android regularly reports NO_MATCH without a final result. Its last partial
+                // is still a live transcription, so recover it here rather than losing a wake
+                // phrase or a same-breath question.
+                if (wakeWordSaid(lastPartialText)) { wake(lastPartialText); return }
                 recreateSpeechRecognizer()
                 Handler(Looper.getMainLooper()).postDelayed({ if (myGen == recognizerGeneration) startWakeWordListening() }, 1800)
             }
