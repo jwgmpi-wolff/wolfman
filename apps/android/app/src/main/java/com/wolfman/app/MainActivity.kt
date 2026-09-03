@@ -20,8 +20,10 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.ArrayAdapter
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -76,6 +78,8 @@ class MainActivity : AppCompatActivity() {
 
     private data class LocalProvider(val baseUrl: String, val kind: String, val model: String)
     private data class AssistantCandidate(val label: String, val packageName: String, val canProcessText: Boolean, val canVoiceCommand: Boolean)
+    private data class ProviderChoice(val id: String, val label: String)
+    private data class ProviderAttempt(val id: String, val label: String, val run: () -> String?)
 
     /** Real wake phrases for known assistants — spoken aloud, never fabricated for unknown ones. */
     private val wakePhrases = mapOf(
@@ -90,6 +94,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var autoListenToggle: CheckBox
     private lateinit var wakeWordToggle: CheckBox
     private lateinit var azureSignInButton: Button
+    private lateinit var primaryProviderPicker: Spinner
+    private lateinit var nextProviderPicker: Spinner
+    private lateinit var pollDepthPicker: Spinner
+    private lateinit var accessModePicker: Spinner
     private lateinit var assistantButtons: LinearLayout
     private lateinit var responseView: TextView
     private var tts: TextToSpeech? = null
@@ -108,6 +116,8 @@ class MainActivity : AppCompatActivity() {
     private var msalApp: ISingleAccountPublicClientApplication? = null
     private var azureAccessToken: String? = null
     private val conversationHistory = mutableListOf<Pair<String, String>>()
+    private var providerChoices: List<ProviderChoice> = emptyList()
+    private var updatingProviderPickers = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -152,6 +162,11 @@ class MainActivity : AppCompatActivity() {
         autoListenToggle = CheckBox(this).apply { text = "\uD83D\uDD34 Auto-listen (no tap needed)"; isChecked = true }
         wakeWordToggle = CheckBox(this).apply { text = "\uD83D\uDC42 Always listen for \"Hey Wolfman\"" }
         azureSignInButton = Button(this).apply { text = "Sign in to Azure" }
+        primaryProviderPicker = Spinner(this)
+        nextProviderPicker = Spinner(this)
+        pollDepthPicker = Spinner(this)
+        accessModePicker = Spinner(this)
+        val saveRoutingButton = Button(this).apply { text = "Save provider routing" }
         val teachButton = Button(this).apply { text = "\uD83D\uDCDA Teach Wolfman (listen)" }
         assistantButtons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         responseView = TextView(this).apply {
@@ -163,6 +178,17 @@ class MainActivity : AppCompatActivity() {
         askButton.setOnClickListener { ask() }
         speakButton.setOnClickListener { listenForQuestion() }
         azureSignInButton.setOnClickListener { signInToAzure() }
+        saveRoutingButton.setOnClickListener {
+            saveRoutingPreferences()
+            refreshProviderPickersAsync()
+            Toast.makeText(this, "Provider routing saved.", Toast.LENGTH_SHORT).show()
+        }
+        accessModePicker.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                if (!updatingProviderPickers) refreshProviderPickersAsync()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
         teachButton.setOnClickListener { promptTeachWolfman() }
         autoListenToggle.setOnCheckedChangeListener { _, checked ->
             Log.d(TAG, "autoListenToggle checked=$checked")
@@ -184,12 +210,22 @@ class MainActivity : AppCompatActivity() {
         root.addView(autoListenToggle)
         root.addView(wakeWordToggle)
         root.addView(azureSignInButton)
+        root.addView(TextView(this).apply { text = "Primary provider" })
+        root.addView(primaryProviderPicker)
+        root.addView(TextView(this).apply { text = "Next provider" })
+        root.addView(nextProviderPicker)
+        root.addView(TextView(this).apply { text = "Poll providers" })
+        root.addView(pollDepthPicker)
+        root.addView(TextView(this).apply { text = "Access mode" })
+        root.addView(accessModePicker)
+        root.addView(saveRoutingButton)
         root.addView(teachButton)
         root.addView(assistantButtons)
         root.addView(responseView)
 
         setContentView(ScrollView(this).apply { addView(root) })
 
+        initializeProviderPickers()
         detectLocalAsync()
         requestIgnoreBatteryOptimizations()
     }
@@ -699,8 +735,82 @@ class MainActivity : AppCompatActivity() {
                     "Installed assistants: none detected"
                 }
                 statusView.text = "$localLine\n$assistantLine"
+                refreshProviderPickers(locals)
             }
         }.start()
+    }
+
+    private fun routingPrefs(): SharedPreferences = getSharedPreferences("wolfman_routing", MODE_PRIVATE)
+
+    private fun initializeProviderPickers() {
+        updatingProviderPickers = true
+        val prefs = routingPrefs()
+        accessModePicker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Device", "Mesh", "Cloud"))
+        accessModePicker.setSelection(listOf("Device", "Mesh", "Cloud").indexOf(prefs.getString("accessMode", "Device")).coerceAtLeast(0))
+        pollDepthPicker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("1", "2", "All"))
+        pollDepthPicker.setSelection(listOf("1", "2", "All").indexOf(prefs.getString("pollDepth", "All")).coerceAtLeast(0))
+        updatingProviderPickers = false
+        refreshProviderPickers(emptyList())
+    }
+
+    private fun refreshProviderPickers(locals: List<LocalProvider>) {
+        val cloudAllowed = accessModePicker.selectedItem?.toString() == "Cloud"
+        providerChoices = buildList {
+            add(ProviderChoice("auto", "Automatic"))
+            locals.forEach { add(ProviderChoice("local:${it.baseUrl}", "${it.kind}: ${it.model}")) }
+            if (cloudAllowed) {
+                add(ProviderChoice("azure", "Azure MCP"))
+                add(ProviderChoice("web", "Web search"))
+            }
+        }
+        val labels = providerChoices.map(ProviderChoice::label)
+        val prefs = routingPrefs()
+        updatingProviderPickers = true
+        listOf(primaryProviderPicker to "primary", nextProviderPicker to "next").forEach { (picker, key) ->
+            picker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+            val saved = prefs.getString(key, "auto")
+            picker.setSelection(providerChoices.indexOfFirst { it.id == saved }.coerceAtLeast(0))
+        }
+        updatingProviderPickers = false
+    }
+
+    private fun refreshProviderPickersAsync() {
+        Thread {
+            val locals = detectLocalAll()
+            Handler(Looper.getMainLooper()).post { refreshProviderPickers(locals) }
+        }.start()
+    }
+
+    private fun saveRoutingPreferences() {
+        routingPrefs().edit()
+            .putString("primary", providerChoices.getOrNull(primaryProviderPicker.selectedItemPosition)?.id ?: "auto")
+            .putString("next", providerChoices.getOrNull(nextProviderPicker.selectedItemPosition)?.id ?: "auto")
+            .putString("pollDepth", pollDepthPicker.selectedItem?.toString() ?: "All")
+            .putString("accessMode", accessModePicker.selectedItem?.toString() ?: "Device")
+            .apply()
+    }
+
+    private fun providerAttempts(locals: List<LocalProvider>, question: String): List<ProviderAttempt> {
+        val prefs = routingPrefs()
+        val cloudAllowed = prefs.getString("accessMode", "Device") == "Cloud"
+        val localAttempts = locals.map { local ->
+            ProviderAttempt("local:${local.baseUrl}", "${local.kind}@${local.baseUrl}") { callLocal(local, question) }
+        }
+        val available = buildList {
+            addAll(localAttempts)
+            if (cloudAllowed) {
+                add(ProviderAttempt("azure", "Azure MCP") {
+                    val token = freshAzureToken() ?: throw java.io.IOException("not signed in (tap Sign in to Azure)")
+                    callAzureMcp(token, question)
+                })
+                add(ProviderAttempt("web", "Web search (DuckDuckGo)") { searchWeb(question) })
+            }
+        }
+        val preferredIds = listOf(prefs.getString("primary", "auto"), prefs.getString("next", "auto"))
+            .filterNotNull().filter { it != "auto" }.distinct()
+        val ordered = preferredIds.mapNotNull { id -> available.firstOrNull { it.id == id } } +
+            available.filter { candidate -> candidate.id !in preferredIds }
+        return ordered.take(when (prefs.getString("pollDepth", "All")) { "1" -> 1; "2" -> 2; else -> ordered.size })
     }
 
     /**
@@ -733,39 +843,14 @@ class MainActivity : AppCompatActivity() {
             val attempts = mutableListOf<String>()
             var answer: String? = null
 
-            for (local in detectLocalAll()) {
-                val outcome = runCatching { callLocal(local, questionWithContext) }
+            for (provider in providerAttempts(detectLocalAll(), questionWithContext)) {
+                val outcome = runCatching { provider.run() }
                 val text = outcome.getOrNull()
                 if (outcome.isSuccess && text != null && !looksLikeRefusal(text)) {
                     answer = text
                     break
                 }
-                attempts += "${local.kind}@${local.baseUrl}: ${outcome.exceptionOrNull()?.message ?: refusalReason(text)}"
-            }
-
-            if (answer == null) {
-                val token = freshAzureToken()
-                if (token != null) {
-                    val outcome = runCatching { callAzureMcp(token, questionWithContext) }
-                    val text = outcome.getOrNull()
-                    if (outcome.isSuccess && text != null && !looksLikeRefusal(text)) {
-                        answer = text
-                    } else {
-                        attempts += "Azure MCP: ${outcome.exceptionOrNull()?.message ?: refusalReason(text)}"
-                    }
-                } else {
-                    attempts += "Azure MCP: not signed in (tap \"Sign in to Azure\")"
-                }
-            }
-
-            if (answer == null) {
-                val outcome = runCatching { searchWeb(question) }
-                val text = outcome.getOrNull()
-                if (outcome.isSuccess && text != null) {
-                    answer = text
-                } else {
-                    attempts += "Web search (DuckDuckGo): ${outcome.exceptionOrNull()?.message ?: "no result for this query"}"
-                }
+                attempts += "${provider.label}: ${outcome.exceptionOrNull()?.message ?: refusalReason(text)}"
             }
 
             val finalText = answer ?: buildString {

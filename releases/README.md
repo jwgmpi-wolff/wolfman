@@ -10,6 +10,8 @@ SHA-256: `0EB565AB31BCC9E3C0B80301595EBEA9AC032AA81FD5B6A6ABB9DB9B61EEDDBD`
 
 `wolfman-android-debug.apk` — debug build of the standalone Android app, rebuilt and pushed here manually after each notable change (not automated).
 
+SHA-256: `4BFA577F7689A707B0712FF0C7AD4BFB7033373CB8A71160DDD5F0EAD1818F48`
+
 ## Install on another device
 
 1. Copy `wolfman-android-debug.apk` to the phone (email, cloud drive, USB, etc.).
