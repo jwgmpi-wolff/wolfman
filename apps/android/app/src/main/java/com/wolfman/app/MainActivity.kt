@@ -828,6 +828,14 @@ class MainActivity : AppCompatActivity() {
             "i cannot help with that", "i can't help with that", "i am not able to", "i'm not able to",
             "i do not understand", "i don't understand", "i cannot answer", "i can't answer",
             "as an ai language model", "i'm unable to", "i am unable to",
+            // A provider that "answers" by admitting it couldn't actually fetch live data is a
+            // failure too, not a real answer — otherwise it silently dead-ends the whole ask
+            // instead of falling through to web search / the Google-Alexa handoff.
+            "encountered errors", "encountered an error", "cannot provide you with", "can't provide you with",
+            "i couldn't retrieve", "i could not retrieve", "unable to retrieve", "cannot retrieve",
+            "couldn't find", "could not find", "cannot find the", "don't have access to", "do not have access to",
+            "don't have real-time", "do not have real-time", "as of my last update", "as of my last training",
+            "can't browse the internet", "cannot browse the internet", "i'm sorry, but i", "i apologize, but i",
         )
         return patterns.any { normalized.contains(it) }
     }
