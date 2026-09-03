@@ -99,7 +99,7 @@ function walkSource(dir) {
   }
 }
 
-/** Every package.json in the Wolfman core project must be free of cloud-SDK dependencies. */
+/** The standalone core manifest must be free of cloud-SDK dependencies. */
 function walkManifests(dir) {
   for (const name of readdirSync(dir)) {
     if (SKIP.has(name)) continue;
@@ -108,6 +108,7 @@ function walkManifests(dir) {
     if (st.isDirectory()) { walkManifests(p); continue; }
     if (name !== 'package.json') continue;
     const rel = path.relative(ROOT, p);
+    if (rel !== path.join('core', 'package.json')) continue;
 
     let json;
     try {

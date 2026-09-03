@@ -119,9 +119,27 @@ export function plan(
     eligible.push(p);
   }
 
+  const preferredRank = new Map(settings.preferredProviderIds.map((id, index) => [id, index]));
   const scored = eligible
     .map((p) => score(p, req, deviceState))
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => {
+      const aRank = preferredRank.get(a.provider.descriptor.id);
+      const bRank = preferredRank.get(b.provider.descriptor.id);
+      if (aRank !== undefined || bRank !== undefined) {
+        if (aRank === undefined) return 1;
+        if (bRank === undefined) return -1;
+        return aRank - bRank;
+      }
+      return b.score - a.score;
+    });
+
+  for (const item of scored) {
+    const rank = preferredRank.get(item.provider.descriptor.id);
+    if (rank !== undefined) item.reasons.unshift(`user provider order #${rank + 1}`);
+  }
+
+  const attemptLimit = settings.maxProviderAttempts === 'all' ? scored.length : settings.maxProviderAttempts;
+  const pollingPool = scored.slice(0, attemptLimit);
 
   const toolProviders = eligible.filter(
     (p) => (p.descriptor.lastProbe?.toolCount ?? 0) > 0 && Boolean(p.tools),
@@ -131,16 +149,18 @@ export function plan(
 
   let mode: RouteMode =
     req.routeHint?.mode ??
-    (requiresLiveTools && toolProviders.length
-      ? 'chain'
-      : FANOUT_INTENTS.includes(req.intent) && scored.length > 1
-        ? 'fanout'
-        : 'single');
+    (settings.preferredProviderIds.length
+      ? 'single'
+      : requiresLiveTools && toolProviders.length
+        ? 'chain'
+        : FANOUT_INTENTS.includes(req.intent) && scored.length > 1
+          ? 'fanout'
+          : 'single');
 
   const primary =
-    mode === 'fanout' ? scored.slice(0, Math.min(3, scored.length)) : scored.slice(0, 1);
+    mode === 'fanout' ? pollingPool.slice(0, Math.min(3, pollingPool.length)) : pollingPool.slice(0, 1);
   // The rest of the ranked list — polled one at a time if every primary choice fails.
-  const fallback = scored.slice(primary.length);
+  const fallback = pollingPool.slice(primary.length);
 
   return { mode, primary, fallback, toolProviders, ineligible, requiresLiveTools };
 }

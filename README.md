@@ -21,6 +21,7 @@ npm run discover    # prints what is ACTUALLY on this machine
 npm run ask -- "what time does the Everett DMV close today"
 npm run voice on    # read every answer aloud via the OS's built-in TTS
 npm run daemon      # expose this device to your other devices
+npm run windows:build # compile and package the Windows NSIS installer
 ```
 
 `npm run discover` prints three sections: candidates found, providers that passed a live probe, and providers that were rejected with the specific failure. Nothing is invented.
@@ -72,6 +73,21 @@ Every eligible provider is scored per request. Operating mode (`standalone` defa
 - **Tool availability** — required for public-info intents (directions, phone numbers, hours, addresses), which are always forced through a live tool call and carry a source URL + fetch timestamp.
 
 Modes: **single**, **fan-out** (parallel, disagreements surfaced rather than averaged away), **chain** (a tool provider fetches live facts, a reasoning provider synthesises them).
+
+The Windows provider panel persists an explicit primary/next order and a `1`, `2`, or `All` attempt limit. Preferred providers still have to pass their live probe, operating-mode policy, privacy policy, and modality checks. A transport failure, empty response, or explicit `WOLFMAN_NO_ANSWER` response hands the request to the next eligible provider.
+
+## Microsoft 365 Copilot
+
+Microsoft 365 Copilot is an optional Windows cloud provider. Register a public-client/native Microsoft Entra application with `http://localhost` as a redirect URI and grant these delegated Microsoft Graph permissions: `Sites.Read.All`, `Mail.Read`, `People.Read.All`, `OnlineMeetingTranscript.Read.All`, `Chat.Read`, `ChannelMessage.Read.All`, and `ExternalItem.Read.All`. The signed-in work or school user also needs a Microsoft 365 Copilot license. Personal Microsoft accounts and application permissions are not supported.
+
+Set the non-secret app identifiers at user scope, restart Wolfman, open **Providers**, and complete the browser sign-in during the first live probe:
+
+```powershell
+[Environment]::SetEnvironmentVariable('WOLFMAN_M365_CLIENT_ID', '<application-client-id>', 'User')
+[Environment]::SetEnvironmentVariable('WOLFMAN_M365_TENANT_ID', '<directory-tenant-id>', 'User')
+```
+
+Select **Microsoft 365 Copilot** as Primary and **Cloud** access. Authentication tokens are held by Microsoft Azure Identity's Windows-protected persistent cache; identifiers and tokens are never written to Wolfman settings or logs. The Copilot Chat API currently uses Microsoft Graph `/beta`, which Microsoft does not support for production applications and may change.
 
 ## Local learning
 

@@ -1,3 +1,1 @@
-{ "name": "@wolfman/core", "version": "1.0.0", "type": "module", "main": "src/index.ts",
-  "bin": { "wolfman": "../wolfman-dist/core/src/cli.js" },
-  "dependencies": { "@wolfman/protocol": "*" } }
+{"name":"@wolfman/core","version":"1.0.0","type":"module","main":"src/index.ts","bin":{"wolfman":"../wolfman-dist/core/src/cli.js"},"dependencies":{"@wolfman/protocol":"*"}}

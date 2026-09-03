@@ -29,6 +29,8 @@ import type { AuditLog } from '../policy/audit.js';
 import type { SettingsStore } from '../policy/settings.js';
 import type { LearningProfile } from '../policy/profile.js';
 
+const NO_ANSWER_SIGNAL = 'WOLFMAN_NO_ANSWER';
+
 export interface OrchestratorDeps {
   providers: () => Provider[];
   deviceState: () => DeviceState;
@@ -275,6 +277,7 @@ export class Orchestrator {
     const { text: safeText, redacted } = redactForTier(req.text, p.descriptor.privacyTier);
     const prompt = [
       safeText,
+      `If you cannot answer the request reliably, respond with exactly ${NO_ANSWER_SIGNAL} so Wolfman can hand off to another live provider.`,
       facts ? `Answer strictly from the live sources below. If they do not contain the answer, say so explicitly — do not fill gaps from memory.\n\n${facts}` : '',
       styleHint,
     ].filter(Boolean).join('\n\n');
@@ -295,6 +298,10 @@ export class Orchestrator {
 
     if (redacted.length) {
       this.deps.audit.egress(p.descriptor, redacted);
+    }
+
+    if (text.trim() === NO_ANSWER_SIGNAL) {
+      throw new Error('provider reported that it could not answer');
     }
 
     return {

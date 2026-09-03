@@ -49,6 +49,10 @@ export interface WolfmanSettings {
   learningEnabled: boolean;
   /** Opt-in: read every answer aloud through an on-device TTS engine as it's delivered. */
   speakRepliesEnabled: boolean;
+  /** Providers to try first, in handoff order. Unlisted live providers remain fallbacks. */
+  preferredProviderIds: string[];
+  /** Maximum number of reasoning providers attempted for one request. */
+  maxProviderAttempts: 1 | 2 | 'all';
 }
 
 export const DEFAULT_WOLFMAN_SETTINGS: WolfmanSettings = {
@@ -56,6 +60,8 @@ export const DEFAULT_WOLFMAN_SETTINGS: WolfmanSettings = {
   lockToDevice: false,
   learningEnabled: true,
   speakRepliesEnabled: false,
+  preferredProviderIds: [],
+  maxProviderAttempts: 'all',
 };
 
 /** Prefixed onto an `information` answer with no live source to verify it against. */

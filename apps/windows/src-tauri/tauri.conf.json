@@ -7,6 +7,7 @@
     "frontendDist": "../ui"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "overlay",
@@ -29,6 +30,12 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "icon": ["icons/icon.png", "icons/icon.ico"]
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "resources": {
+      "../../../wolfman-dist/**/*": "wolfman-dist/",
+      "../../../packages/protocol/dist/**/*": "node_modules/@wolfman/protocol/dist/",
+      "../../../packages/protocol/package.json": "node_modules/@wolfman/protocol/package.json",
+      "../runtime/node_modules/**/*": "node_modules/"
+    }
   }
 }

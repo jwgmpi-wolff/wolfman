@@ -17,6 +17,8 @@
     "ask": "node wolfman-dist/core/src/cli.js",
     "voice": "node wolfman-dist/core/src/cli.js voice",
     "daemon": "node wolfman-dist/daemon/src/index.js",
+    "windows:runtime": "npm install --omit=dev --prefix apps/windows/runtime && node scripts/prepare-windows-runtime.mjs",
+    "windows:build": "npm run build && npm run windows:runtime && tauri build --config apps/windows/src-tauri/tauri.conf.json",
     "test:integration": "node --test --test-name-pattern=@integration wolfman-dist/core/src/**/*.test.js"
   },
   "devDependencies": {

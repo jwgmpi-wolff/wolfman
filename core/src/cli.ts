@@ -39,12 +39,30 @@ async function boot() {
   const registry = new ProviderRegistry();
   const candidates = await discover(device);
   const report = await registry.registerAll(candidates, device);
+  if (process.env.WOLFMAN_M365_CLIENT_ID && process.env.WOLFMAN_M365_TENANT_ID) {
+    const candidate = {
+      id: 'microsoft-365-copilot@graph',
+      displayName: 'Microsoft 365 Copilot',
+      transport: 'native-sdk' as const,
+      privacyTier: 'cloud' as const,
+      evidence: 'configured Microsoft Entra delegated application',
+    };
+    candidates.push(candidate);
+    const { Microsoft365CopilotProvider } = await import('../../packages/m365-copilot/src/index.js');
+    const descriptor = await registry.registerDirect(new Microsoft365CopilotProvider(device), 120000);
+    if (descriptor.lastProbe?.status === 'available') {
+      report.registered.push(descriptor);
+    } else {
+      report.rejected.push({ candidate, probe: descriptor.lastProbe! });
+    }
+  }
   return { registry, candidates, report };
 }
 
 async function main() {
+  const settingsFile = path.join(os.homedir(), '.wolfman', 'settings.json');
+
   if (cmd === 'voice') {
-    const settingsFile = path.join(os.homedir(), '.wolfman', 'settings.json');
     const store = new SettingsStore(settingsFile);
     const settings = await store.load();
     if (args[1] === 'on' || args[1] === 'off') {
@@ -52,6 +70,34 @@ async function main() {
       await store.save(settings);
     }
     console.log(`Speak replies aloud: ${settings.speakRepliesEnabled ? 'on' : 'off'}`);
+    return;
+  }
+
+  if (cmd === 'settings') {
+    const store = new SettingsStore(settingsFile);
+    const settings = await store.load();
+    if (args[1] === 'provider-routing') {
+      const maxProviderAttempts = args[2] === 'all' ? 'all' : Number(args[2]);
+      if (maxProviderAttempts !== 'all' && maxProviderAttempts !== 1 && maxProviderAttempts !== 2) {
+        throw new Error('provider polling depth must be 1, 2, or all');
+      }
+      const mode = args[3];
+      if (mode !== 'standalone' && mode !== 'mesh' && mode !== 'connected') {
+        throw new Error('operating mode must be standalone, mesh, or connected');
+      }
+      settings.maxProviderAttempts = maxProviderAttempts;
+      settings.mode = mode;
+      settings.preferredProviderIds = [...new Set(args.slice(4).filter(Boolean))];
+      await store.save(settings);
+    }
+    console.log(jsonMode ? JSON.stringify(settings) : JSON.stringify(settings, null, 2));
+    return;
+  }
+
+  if (cmd === 'providers') {
+    const { candidates, report } = await boot();
+    const settings = await new SettingsStore(settingsFile).load();
+    console.log(JSON.stringify({ candidates, ...report, settings }));
     return;
   }
 
@@ -73,7 +119,7 @@ async function main() {
   const presence = new PresenceStore();
   presence.subscribe((s) => process.stderr.write(`\r[${s.state}${s.activeProvider ? ' · ' + s.activeProvider : ''}]        `));
 
-  const settingsStore = new SettingsStore(path.join(os.homedir(), '.wolfman', 'settings.json'));
+  const settingsStore = new SettingsStore(settingsFile);
   const orch = new Orchestrator({
     providers: () => registry.all(),
     deviceState: () => ({ batteryPct: null, onBattery: false, thermalPressure: 'unknown', networkMetered: false }),

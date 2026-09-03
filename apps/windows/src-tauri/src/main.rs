@@ -23,10 +23,22 @@ struct AskResult {
     attempts: Option<serde_json::Value>,
 }
 
-fn repo_root() -> PathBuf {
-    // apps/windows/src-tauri/target/<profile>/ -> walk up to the repo root.
-    let exe = std::env::current_exe().expect("current exe path");
-    exe.ancestors().nth(5).expect("repo root").to_path_buf()
+fn cli_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let development_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../wolfman-dist/core/src/cli.js");
+    if development_cli.is_file() {
+        return Ok(development_cli);
+    }
+
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("could not locate installed resources: {error}"))?;
+    let installed_cli = resource_dir.join("wolfman-dist/core/src/cli.js");
+    installed_cli
+        .is_file()
+        .then_some(installed_cli)
+        .ok_or_else(|| "installed Wolfman core is missing".to_string())
 }
 
 fn open_overlay(app: &AppHandle) {
@@ -49,8 +61,11 @@ fn open_overlay(app: &AppHandle) {
 /// Calls the real Wolfman core CLI. No mock path: a failure to discover/reach a
 /// live provider comes back as the CLI's own NO_LIVE_SOURCE report, verbatim.
 #[tauri::command]
-fn ask(text: String) -> AskResult {
-    let cli = repo_root().join("wolfman-dist/core/src/cli.js");
+fn ask(app: AppHandle, text: String) -> AskResult {
+    let cli = match cli_path(&app) {
+        Ok(path) => path,
+        Err(reason) => return AskResult { ok: false, text: None, reason: Some(reason), attempts: None },
+    };
     let output = Command::new("node").arg(&cli).arg("--json").arg(&text).output();
 
     match output {
@@ -75,6 +90,40 @@ fn ask(text: String) -> AskResult {
     }
 }
 
+fn run_cli_json(app: &AppHandle, args: &[&str]) -> Result<serde_json::Value, String> {
+    let cli = cli_path(app)?;
+    let output = Command::new("node")
+        .arg(cli)
+        .arg("--json")
+        .args(args)
+        .output()
+        .map_err(|error| format!("could not run the CLI: {error}"))?;
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("CLI produced no parseable output: {error}"))
+}
+
+#[tauri::command]
+fn providers(app: AppHandle) -> Result<serde_json::Value, String> {
+    run_cli_json(&app, &["providers"])
+}
+
+#[tauri::command]
+fn set_provider_routing(
+    app: AppHandle,
+    provider_ids: Vec<String>,
+    max_provider_attempts: String,
+    operating_mode: String,
+) -> Result<serde_json::Value, String> {
+    let mut args = vec![
+        "settings",
+        "provider-routing",
+        max_provider_attempts.as_str(),
+        operating_mode.as_str(),
+    ];
+    args.extend(provider_ids.iter().map(String::as_str));
+    run_cli_json(&app, &args)
+}
+
 #[tauri::command]
 fn hide_overlay(app: AppHandle) {
     if let Some(w) = app.get_webview_window("overlay") {
@@ -85,7 +134,7 @@ fn hide_overlay(app: AppHandle) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![ask, hide_overlay])
+        .invoke_handler(tauri::generate_handler![ask, providers, set_provider_routing, hide_overlay])
         .setup(|app| {
             app.global_shortcut().on_shortcut(
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space),
