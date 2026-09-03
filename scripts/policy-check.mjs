@@ -18,6 +18,10 @@ import path from 'node:path';
 const ROOT = process.cwd();
 const WOLFMAN_ROOTS = ['packages', 'core', 'daemon', 'apps', 'types'];
 const SKIP = new Set(['node_modules', 'dist', '.git', 'build', '.gradle']);
+const GENERATED_WINDOWS_ROOTS = [
+  path.join('apps', 'windows', 'src-tauri', 'resources'),
+  path.join('apps', 'windows', 'src-tauri', 'target'),
+];
 const EXT = /\.(ts|tsx|js|mjs|kt|swift|json)$/;
 
 const FORBIDDEN = [
@@ -66,6 +70,8 @@ function importSpecifiers(line) {
 }
 
 function walkSource(dir) {
+  const relativeDir = path.relative(ROOT, dir);
+  if (GENERATED_WINDOWS_ROOTS.some((generated) => relativeDir === generated || relativeDir.startsWith(generated + path.sep))) return;
   for (const name of readdirSync(dir)) {
     if (SKIP.has(name)) continue;
     const p = path.join(dir, name);
@@ -101,6 +107,8 @@ function walkSource(dir) {
 
 /** The standalone core manifest must be free of cloud-SDK dependencies. */
 function walkManifests(dir) {
+  const relativeDir = path.relative(ROOT, dir);
+  if (GENERATED_WINDOWS_ROOTS.some((generated) => relativeDir === generated || relativeDir.startsWith(generated + path.sep))) return;
   for (const name of readdirSync(dir)) {
     if (SKIP.has(name)) continue;
     const p = path.join(dir, name);

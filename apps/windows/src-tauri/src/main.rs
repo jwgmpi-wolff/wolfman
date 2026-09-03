@@ -24,20 +24,20 @@ struct AskResult {
 }
 
 fn cli_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let development_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../wolfman-dist/core/src/cli.js");
-    if development_cli.is_file() {
-        return Ok(development_cli);
-    }
-
     let resource_dir = app
         .path()
         .resource_dir()
         .map_err(|error| format!("could not locate installed resources: {error}"))?;
-    let installed_cli = resource_dir.join("wolfman-dist/core/src/cli.js");
-    installed_cli
+    let installed_cli = resource_dir.join("resources/wolfman-dist/core/src/cli.js");
+    if installed_cli.is_file() {
+        return Ok(installed_cli);
+    }
+
+    let development_cli = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../wolfman-dist/core/src/cli.js");
+    development_cli
         .is_file()
-        .then_some(installed_cli)
+        .then_some(development_cli)
         .ok_or_else(|| "installed Wolfman core is missing".to_string())
 }
 
