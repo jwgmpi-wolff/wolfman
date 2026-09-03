@@ -60,8 +60,19 @@ fn user_environment_value(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn node_executable() -> PathBuf {
+    let program_files = std::env::var_os("ProgramFiles")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
+    let installed = program_files.join("nodejs/node.exe");
+    if installed.is_file() {
+        return installed;
+    }
+    PathBuf::from("node.exe")
+}
+
 fn wolfman_node_command(cli: &PathBuf) -> Command {
-    let mut command = Command::new("node");
+    let mut command = Command::new(node_executable());
     command.arg(cli);
     if let Some(root) = cli.parent().and_then(|path| path.parent()).and_then(|path| path.parent()) {
         command.current_dir(root);
@@ -71,7 +82,17 @@ fn wolfman_node_command(cli: &PathBuf) -> Command {
             command.env(name, value);
         }
     }
+    if let Some(profile) = std::env::var_os("USERPROFILE") {
+        command.env("USERPROFILE", &profile);
+        command.env("HOME", profile);
+    }
     command
+}
+
+fn child_failure(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let detail = stderr.trim().lines().last().unwrap_or("no diagnostic output");
+    format!("Wolfman provider process exited with {}: {}", output.status, detail.chars().take(300).collect::<String>())
 }
 
 fn open_overlay(app: &AppHandle) {
@@ -107,7 +128,7 @@ fn ask(app: AppHandle, text: String) -> AskResult {
                 return AskResult {
                     ok: false,
                     text: None,
-                    reason: Some(format!("Wolfman provider process exited with {}", out.status)),
+                    reason: Some(child_failure(&out)),
                     attempts: None,
                 };
             }
@@ -139,7 +160,7 @@ fn run_cli_json(app: &AppHandle, args: &[&str]) -> Result<serde_json::Value, Str
         .output()
         .map_err(|error| format!("could not run the CLI: {error}"))?;
     if !output.status.success() {
-        return Err(format!("Wolfman provider process exited with {}", output.status));
+        return Err(child_failure(&output));
     }
     serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("CLI produced no parseable output: {error}"))
