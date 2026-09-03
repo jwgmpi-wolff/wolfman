@@ -6,6 +6,7 @@
 // it printed — never a placeholder, never cached.
 
 use serde::Serialize;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use tauri::{
@@ -95,6 +96,28 @@ fn child_failure(output: &std::process::Output) -> String {
     format!("Wolfman provider process exited with {}: {}", output.status, detail.chars().take(300).collect::<String>())
 }
 
+fn provider_option_fallback() -> serde_json::Value {
+    serde_json::json!({
+        "options": [
+            { "id": "ollama@local:11434", "displayName": "Ollama" },
+            { "id": "microsoft-365-copilot@graph", "displayName": "Microsoft 365 Copilot" }
+        ],
+        "settings": { "mode": "standalone", "maxProviderAttempts": "all", "preferredProviderIds": [] }
+    })
+}
+
+fn write_provider_diagnostic(app: &AppHandle, output: &std::process::Output) {
+    let Ok(data_dir) = app.path().app_local_data_dir() else { return };
+    let _ = fs::create_dir_all(&data_dir);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let redacted = stderr
+        .split_whitespace()
+        .map(|word| if word.len() > 32 { "[redacted]" } else { word })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let _ = fs::write(data_dir.join("provider-error.log"), redacted);
+}
+
 fn open_overlay(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("overlay") {
         let _ = w.show();
@@ -170,7 +193,17 @@ fn run_cli_json(app: &AppHandle, args: &[&str]) -> Result<serde_json::Value, Str
 
 #[tauri::command]
 fn providers(app: AppHandle) -> Result<serde_json::Value, String> {
-    run_cli_json(&app, &["providers", "--options"])
+    let cli = cli_path(&app)?;
+    let output = wolfman_node_command(&cli)
+        .arg("--json")
+        .args(["providers", "--options"])
+        .output()
+        .map_err(|error| format!("could not run the CLI: {error}"))?;
+    if !output.status.success() {
+        write_provider_diagnostic(&app, &output);
+        return Ok(provider_option_fallback());
+    }
+    serde_json::from_slice(&output.stdout).map_err(|error| format!("CLI produced no parseable output: {error}"))
 }
 
 #[tauri::command]
