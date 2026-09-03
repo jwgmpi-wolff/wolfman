@@ -74,9 +74,11 @@ fn node_executable() -> PathBuf {
 
 fn wolfman_node_command(cli: &PathBuf) -> Command {
     let mut command = Command::new(node_executable());
-    command.arg(cli);
     if let Some(root) = cli.parent().and_then(|path| path.parent()).and_then(|path| path.parent()) {
         command.current_dir(root);
+        command.arg("core/src/cli.js");
+    } else {
+        command.arg(cli);
     }
     for name in ["WOLFMAN_M365_CLIENT_ID", "WOLFMAN_M365_TENANT_ID"] {
         if let Some(value) = user_environment_value(name) {
