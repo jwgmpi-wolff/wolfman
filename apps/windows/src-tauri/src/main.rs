@@ -131,10 +131,10 @@ fn open_overlay(app: &AppHandle) {
         .inner_size(1040.0, 680.0)
         .min_inner_size(760.0, 480.0)
         .resizable(true)
-        .decorations(false)
-        .transparent(true)
+        .decorations(true)
+        .transparent(false)
         .always_on_top(true)
-        .skip_taskbar(true)
+        .skip_taskbar(false)
         .center()
         .build();
 }
