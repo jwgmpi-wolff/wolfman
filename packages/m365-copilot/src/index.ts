@@ -1,4 +1,9 @@
-import { InteractiveBrowserCredential, useIdentityPlugin } from '@azure/identity';
+import {
+  deserializeAuthenticationRecord,
+  InteractiveBrowserCredential,
+  serializeAuthenticationRecord,
+  useIdentityPlugin,
+} from '@azure/identity';
 import { cachePersistencePlugin } from '@azure/identity-cache-persistence';
 import {
   NoLiveSourceError,
@@ -44,7 +49,7 @@ export class Microsoft365CopilotProvider implements Provider {
   descriptor: ProviderDescriptor;
   private credential: InteractiveBrowserCredential;
 
-  constructor(device: DeviceRef) {
+  constructor(device: DeviceRef, authenticationRecord?: string) {
     this.descriptor = {
       id: 'microsoft-365-copilot@graph',
       displayName: 'Microsoft 365 Copilot',
@@ -59,6 +64,9 @@ export class Microsoft365CopilotProvider implements Provider {
     this.credential = new InteractiveBrowserCredential({
       clientId: process.env.WOLFMAN_M365_CLIENT_ID,
       tenantId: process.env.WOLFMAN_M365_TENANT_ID,
+      // A background health probe must never leave a browser callback server open.
+      disableAutomaticAuthentication: true,
+      authenticationRecord: authenticationRecord ? deserializeAuthenticationRecord(authenticationRecord) : undefined,
       tokenCachePersistenceOptions: {
         enabled: true,
         name: 'wolfman-microsoft-365-copilot',
@@ -70,6 +78,12 @@ export class Microsoft365CopilotProvider implements Provider {
     const access = await this.credential.getToken(SCOPES, { abortSignal: signal });
     if (!access?.token) throw new Error('Microsoft Entra returned no delegated access token');
     return access.token;
+  }
+
+  async authenticate(signal: AbortSignal): Promise<string> {
+    const record = await this.credential.authenticate(SCOPES, { abortSignal: signal });
+    if (!record) throw new Error('Microsoft Entra returned no authentication record');
+    return serializeAuthenticationRecord(record);
   }
 
   private async createConversation(token: string, signal: AbortSignal): Promise<string> {

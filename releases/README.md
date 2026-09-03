@@ -4,7 +4,7 @@
 
 `wolfman-windows-arm64-setup.exe` installs the Wolfman tray and overlay app on Windows ARM64. The installer includes the production Node runtime dependencies used for local provider discovery and optional Microsoft 365 Copilot authentication.
 
-SHA-256: `A6F52C38BA3AEAFA83FB28532D41C4B4A32E920346A476CC85D347B137A3E7C8`
+SHA-256: `B3CA14E4A5723BF276226011A31BB6D350ECF2651946B996568339E0710AA6A4`
 
 ## Android APK
 

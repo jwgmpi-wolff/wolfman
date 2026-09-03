@@ -41,6 +41,27 @@ export function buildProvider(c: Candidate, device: DeviceRef): Provider | null 
   return f ? f.create(c, device) : null;
 }
 
+async function probeWithTimeout(provider: Provider, timeoutMs: number): Promise<ProbeResult> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<ProbeResult>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(failedProbe('PROBE_TIMEOUT', `probe exceeded ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([
+      provider.probe(controller.signal).catch((error: unknown) =>
+        failedProbe('PROBE_THREW', error instanceof Error ? error.message : String(error))),
+      timeout,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /* ────────────────────────────── registry ────────────────────────────── */
 
 export class ProviderRegistry {
@@ -80,22 +101,14 @@ export class ProviderRegistry {
           });
           return;
         }
-        const ac = new AbortController();
-        const t = setTimeout(() => ac.abort(), timeoutMs);
-        try {
-          const probe = await provider.probe(ac.signal);
-          provider.descriptor.lastProbe = probe;
-          if (probe.status === 'available') {
-            this.providers.set(provider.descriptor.id, provider);
-            registered.push(provider.descriptor);
-          } else {
-            this.providers.set(provider.descriptor.id, provider); // keep for UI
-            rejected.push({ candidate: c, probe });
-          }
-        } catch (e: any) {
-          rejected.push({ candidate: c, probe: failedProbe('PROBE_THREW', String(e?.message ?? e)) });
-        } finally {
-          clearTimeout(t);
+        const probe = await probeWithTimeout(provider, timeoutMs);
+        provider.descriptor.lastProbe = probe;
+        if (probe.status === 'available') {
+          this.providers.set(provider.descriptor.id, provider);
+          registered.push(provider.descriptor);
+        } else {
+          this.providers.set(provider.descriptor.id, provider); // keep for UI
+          rejected.push({ candidate: c, probe });
         }
       }),
     );
@@ -109,15 +122,7 @@ export class ProviderRegistry {
    * config) that never go through local candidate discovery.
    */
   async registerDirect(provider: Provider, timeoutMs = 6000): Promise<ProviderDescriptor> {
-    const ac = new AbortController();
-    const t = setTimeout(() => ac.abort(), timeoutMs);
-    try {
-      provider.descriptor.lastProbe = await provider.probe(ac.signal);
-    } catch (e: any) {
-      provider.descriptor.lastProbe = failedProbe('PROBE_THREW', String(e?.message ?? e));
-    } finally {
-      clearTimeout(t);
-    }
+    provider.descriptor.lastProbe = await probeWithTimeout(provider, timeoutMs);
     this.providers.set(provider.descriptor.id, provider);
     return provider.descriptor;
   }
@@ -126,15 +131,7 @@ export class ProviderRegistry {
   async refresh(timeoutMs = 6000): Promise<void> {
     await Promise.all(
       this.all().map(async (p) => {
-        const ac = new AbortController();
-        const t = setTimeout(() => ac.abort(), timeoutMs);
-        try {
-          p.descriptor.lastProbe = await p.probe(ac.signal);
-        } catch (e: any) {
-          p.descriptor.lastProbe = failedProbe('PROBE_THREW', String(e?.message ?? e));
-        } finally {
-          clearTimeout(t);
-        }
+        p.descriptor.lastProbe = await probeWithTimeout(p, timeoutMs);
       }),
     );
   }

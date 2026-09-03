@@ -37,7 +37,7 @@
   button { cursor: pointer; }
   option { color: #16161a; }
   .providers {
-    display: grid; grid-template-columns: 1fr 1fr 100px 120px auto; gap: 10px;
+    display: grid; grid-template-columns: 1fr 1fr 88px 112px auto auto; gap: 10px;
     align-items: end; padding: 12px 18px; border-bottom: 1px solid var(--edge);
   }
   .providers[hidden] { display: none; }
@@ -78,6 +78,7 @@
       <label>Poll<select id="pollDepth"><option value="1">1</option><option value="2">2</option><option value="all">All</option></select></label>
       <label>Access<select id="operatingMode"><option value="standalone">Device</option><option value="mesh">Mesh</option><option value="connected">Cloud</option></select></label>
       <button id="saveProviders" type="button">Save</button>
+      <button id="microsoftAuth" type="button">Sign in to Microsoft</button>
       <div class="provider-status" id="providerStatus"></div>
     </div>
 
@@ -172,6 +173,17 @@ $('saveProviders').addEventListener('click', async () => {
       operatingMode: $('operatingMode').value,
     });
     $('providerStatus').textContent = 'Provider handoff order saved.';
+  } catch (error) {
+    $('providerStatus').textContent = String(error);
+  }
+});
+
+$('microsoftAuth').addEventListener('click', async () => {
+  $('providerStatus').textContent = 'Opening Microsoft sign-in...';
+  try {
+    await invoke('microsoft_auth');
+    $('providerStatus').textContent = 'Microsoft sign-in complete. Refreshing providers...';
+    await loadProviders();
   } catch (error) {
     $('providerStatus').textContent = String(error);
   }

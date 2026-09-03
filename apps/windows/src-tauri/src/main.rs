@@ -41,6 +41,36 @@ fn cli_path(app: &AppHandle) -> Result<PathBuf, String> {
         .ok_or_else(|| "installed Wolfman core is missing".to_string())
 }
 
+fn user_environment_value(name: &str) -> Option<String> {
+    if let Ok(value) = std::env::var(name) {
+        return Some(value);
+    }
+    let output = Command::new("reg")
+        .args(["query", "HKCU\\Environment", "/v", name])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    stdout
+        .lines()
+        .find_map(|line| line.split_once("REG_SZ"))
+        .map(|(_, value)| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn wolfman_node_command(cli: &PathBuf) -> Command {
+    let mut command = Command::new("node");
+    command.arg(cli);
+    for name in ["WOLFMAN_M365_CLIENT_ID", "WOLFMAN_M365_TENANT_ID"] {
+        if let Some(value) = user_environment_value(name) {
+            command.env(name, value);
+        }
+    }
+    command
+}
+
 fn open_overlay(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("overlay") {
         let _ = w.show();
@@ -66,7 +96,7 @@ fn ask(app: AppHandle, text: String) -> AskResult {
         Ok(path) => path,
         Err(reason) => return AskResult { ok: false, text: None, reason: Some(reason), attempts: None },
     };
-    let output = Command::new("node").arg(&cli).arg("--json").arg(&text).output();
+    let output = wolfman_node_command(&cli).arg("--json").arg(&text).output();
 
     match output {
         Ok(out) => {
@@ -92,8 +122,7 @@ fn ask(app: AppHandle, text: String) -> AskResult {
 
 fn run_cli_json(app: &AppHandle, args: &[&str]) -> Result<serde_json::Value, String> {
     let cli = cli_path(app)?;
-    let output = Command::new("node")
-        .arg(cli)
+    let output = wolfman_node_command(&cli)
         .arg("--json")
         .args(args)
         .output()
@@ -105,6 +134,11 @@ fn run_cli_json(app: &AppHandle, args: &[&str]) -> Result<serde_json::Value, Str
 #[tauri::command]
 fn providers(app: AppHandle) -> Result<serde_json::Value, String> {
     run_cli_json(&app, &["providers"])
+}
+
+#[tauri::command]
+fn microsoft_auth(app: AppHandle) -> Result<serde_json::Value, String> {
+    run_cli_json(&app, &["microsoft-auth"])
 }
 
 #[tauri::command]
@@ -134,7 +168,7 @@ fn hide_overlay(app: AppHandle) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![ask, providers, set_provider_routing, hide_overlay])
+        .invoke_handler(tauri::generate_handler![ask, providers, microsoft_auth, set_provider_routing, hide_overlay])
         .setup(|app| {
             app.global_shortcut().on_shortcut(
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space),

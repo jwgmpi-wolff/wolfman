@@ -9,6 +9,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { promises as fs } from 'node:fs';
 
 import { discover } from './discovery/index.js';
 import { ProviderRegistry } from './providers/registry.js';
@@ -25,6 +26,21 @@ const rawArgs = process.argv.slice(2);
 const jsonMode = rawArgs.includes('--json');
 const args = rawArgs.filter((a) => a !== '--json');
 const cmd = args[0];
+const microsoftAuthRecordFile = path.join(os.homedir(), '.wolfman', 'microsoft-365-copilot-auth.json');
+
+async function loadMicrosoftAuthRecord(): Promise<string | undefined> {
+  try {
+    const record = JSON.parse(await fs.readFile(microsoftAuthRecordFile, 'utf8')) as { authenticationRecord?: unknown };
+    return typeof record.authenticationRecord === 'string' ? record.authenticationRecord : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function saveMicrosoftAuthRecord(authenticationRecord: string): Promise<void> {
+  await fs.mkdir(path.dirname(microsoftAuthRecordFile), { recursive: true });
+  await fs.writeFile(microsoftAuthRecordFile, JSON.stringify({ authenticationRecord }), 'utf8');
+}
 
 const device: DeviceRef = {
   id: 'cli',
@@ -49,7 +65,10 @@ async function boot() {
     };
     candidates.push(candidate);
     const { Microsoft365CopilotProvider } = await import('../../packages/m365-copilot/src/index.js');
-    const descriptor = await registry.registerDirect(new Microsoft365CopilotProvider(device), 120000);
+    const descriptor = await registry.registerDirect(
+      new Microsoft365CopilotProvider(device, await loadMicrosoftAuthRecord()),
+      120000,
+    );
     if (descriptor.lastProbe?.status === 'available') {
       report.registered.push(descriptor);
     } else {
@@ -61,6 +80,17 @@ async function boot() {
 
 async function main() {
   const settingsFile = path.join(os.homedir(), '.wolfman', 'settings.json');
+
+  if (cmd === 'microsoft-auth') {
+    if (!process.env.WOLFMAN_M365_CLIENT_ID || !process.env.WOLFMAN_M365_TENANT_ID) {
+      throw new Error('Microsoft 365 Copilot is not configured for this Windows user');
+    }
+    const { Microsoft365CopilotProvider } = await import('../../packages/m365-copilot/src/index.js');
+    const authenticationRecord = await new Microsoft365CopilotProvider(device).authenticate(AbortSignal.timeout(120000));
+    await saveMicrosoftAuthRecord(authenticationRecord);
+    console.log(JSON.stringify({ ok: true }));
+    return;
+  }
 
   if (cmd === 'voice') {
     const store = new SettingsStore(settingsFile);
