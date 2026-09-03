@@ -85,15 +85,24 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var statusView: TextView
     private lateinit var questionInput: EditText
+    private lateinit var orbView: OrbView
     private lateinit var speakRepliesToggle: CheckBox
     private lateinit var autoListenToggle: CheckBox
+    private lateinit var wakeWordToggle: CheckBox
     private lateinit var azureSignInButton: Button
     private lateinit var assistantButtons: LinearLayout
     private lateinit var responseView: TextView
     private var tts: TextToSpeech? = null
     private var speechRecognizer: SpeechRecognizer? = null
+    // Bumped by every function that starts a new listen session on the shared recognizer.
+    // Each session's callbacks capture the value at the moment they started and check it
+    // before acting — a session superseded by a newer one (e.g. Speak tapped while the
+    // wake-word loop was still listening) becomes a no-op instead of fighting over the mic.
+    private var recognizerGeneration = 0
     private var lastAskedQuestion: String? = null
     private var pendingHandoffQuestion: String? = null
+    private var pendingSequentialHandoff: (() -> Unit)? = null
+    private var detectedAssistants: List<AssistantCandidate> = emptyList()
     private var msalApp: ISingleAccountPublicClientApplication? = null
     private var azureAccessToken: String? = null
     private val conversationHistory = mutableListOf<Pair<String, String>>()
@@ -126,7 +135,12 @@ class MainActivity : AppCompatActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 96, 48, 48)
+            setBackgroundColor(android.graphics.Color.parseColor("#0A1628"))
         }
+
+        orbView = OrbView(this)
+        val orbSize = (resources.displayMetrics.density * 280).toInt()
+        root.addView(orbView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, orbSize))
 
         statusView = TextView(this).apply { text = "Detecting on-device AI providers\u2026" }
         questionInput = EditText(this).apply { hint = "Ask Wolfman\u2026" }
@@ -134,6 +148,7 @@ class MainActivity : AppCompatActivity() {
         val speakButton = Button(this).apply { text = "\uD83C\uDFA4 Speak" }
         speakRepliesToggle = CheckBox(this).apply { text = "Speak replies aloud"; isChecked = true }
         autoListenToggle = CheckBox(this).apply { text = "\uD83D\uDD34 Auto-listen (no tap needed)" }
+        wakeWordToggle = CheckBox(this).apply { text = "\uD83D\uDC42 Always listen for \"Hey Wolfman\""; isChecked = true }
         azureSignInButton = Button(this).apply { text = "Sign in to Azure" }
         val teachButton = Button(this).apply { text = "\uD83D\uDCDA Teach Wolfman (listen)" }
         assistantButtons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -149,8 +164,15 @@ class MainActivity : AppCompatActivity() {
         teachButton.setOnClickListener { promptTeachWolfman() }
         autoListenToggle.setOnCheckedChangeListener { _, checked ->
             Log.d(TAG, "autoListenToggle checked=$checked")
-            if (checked) listenForQuestion()
+            if (checked) { wakeWordToggle.isChecked = false; listenForQuestion() }
         }
+        wakeWordToggle.setOnCheckedChangeListener { _, checked ->
+            Log.d(TAG, "wakeWordToggle checked=$checked")
+            if (checked) { autoListenToggle.isChecked = false; startWakeWordListening() }
+        }
+        // Checkbox defaults to on, but setting isChecked above ran before this listener was
+        // attached, so it never fired for that initial value — start the loop explicitly.
+        if (wakeWordToggle.isChecked) startWakeWordListening()
 
         root.addView(statusView)
         root.addView(questionInput)
@@ -158,6 +180,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(speakButton)
         root.addView(speakRepliesToggle)
         root.addView(autoListenToggle)
+        root.addView(wakeWordToggle)
         root.addView(azureSignInButton)
         root.addView(teachButton)
         root.addView(assistantButtons)
@@ -166,6 +189,31 @@ class MainActivity : AppCompatActivity() {
         setContentView(ScrollView(this).apply { addView(root) })
 
         detectLocalAsync()
+        requestIgnoreBatteryOptimizations()
+    }
+
+    /**
+     * "Hey Wolfman" needs its foreground service to survive as long as possible in the
+     * background — the OS's default battery optimization is the single biggest thing that
+     * kills that early. Requesting the exemption needs a real user-facing system dialog
+     * (can't be silently granted), so this only fires the request once, and only if not
+     * already exempted.
+     */
+    private fun requestIgnoreBatteryOptimizations() {
+        val powerManager = getSystemService(POWER_SERVICE) as? android.os.PowerManager ?: return
+        if (powerManager.isIgnoringBatteryOptimizations(packageName)) return
+        val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:$packageName"))
+        runCatching { startActivity(intent) }
+            .onFailure { Log.d(TAG, "requestIgnoreBatteryOptimizations: failed: ${it.message}") }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        val micIndex = permissions.indexOf(android.Manifest.permission.RECORD_AUDIO)
+        val micGranted = micIndex != -1 && grantResults.getOrNull(micIndex) == PackageManager.PERMISSION_GRANTED
+        // Mic permission is requested asynchronously at launch, so "Hey Wolfman" defaulting to on
+        // couldn't actually start listening until the user answers this dialog — kick it off now.
+        if (micGranted && wakeWordToggle.isChecked) startWakeWordListening()
     }
 
     override fun onDestroy() {
@@ -182,6 +230,16 @@ class MainActivity : AppCompatActivity() {
      * after each utterance so you never have to tap Speak again — except
      * while handing off to Google/Alexa, when it must stay off the mic.
      */
+    /** Strips a leading "Hey Wolfman"/"Wolfman" from recognized text — people naturally say it
+     * again as part of the real question even in a separate follow-up listen, not just when
+     * said in the same breath as the original wake-up. */
+    private fun stripWakeWordPrefix(text: String): String {
+        val match = Regex("(?i)^\\s*hey\\s*wolf\\s*man\\s*[,.]?\\s*(.*)").find(text)
+            ?: Regex("(?i)^\\s*wolfman\\s*[,.]?\\s*(.*)").find(text)
+        val remainder = match?.groupValues?.get(1)?.trim()
+        return remainder?.takeIf { it.isNotBlank() } ?: text
+    }
+
     private fun listenForQuestion() {
         Log.d(TAG, "listenForQuestion() called")
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -190,6 +248,11 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Microphone permission is needed to speak to Wolfman.", Toast.LENGTH_LONG).show()
             return
         }
+        // Always start from a guaranteed-fresh recognizer instance: calling startListening() on
+        // one that's still mid-session from another listen mode (e.g. the wake-word loop) throws
+        // ERROR_CLIENT immediately — recreating first avoids that collision instead of just
+        // reacting to it after the fact.
+        recreateSpeechRecognizer()
         val recognizer = speechRecognizer
         if (recognizer == null) {
             Log.d(TAG, "listenForQuestion: speechRecognizer is null (not available on this device)")
@@ -198,44 +261,75 @@ class MainActivity : AppCompatActivity() {
         }
 
         val intent = speechRecognizerIntent()
+        // The final result frequently comes back empty even though partial results captured the
+        // full sentence — a known flakiness in the on-device recognition service. Fall back to
+        // the last non-empty partial transcript rather than treating that as "didn't catch it".
+        var lastPartialText: String? = null
+        val myGen = ++recognizerGeneration
 
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
+                if (myGen != recognizerGeneration) return
                 Log.d(TAG, "listenForQuestion: onReadyForSpeech")
-                Handler(Looper.getMainLooper()).post { statusView.text = "Listening\u2026" }
+                Handler(Looper.getMainLooper()).post { statusView.text = "Listening\u2026"; orbView.setState(OrbState.LISTENING) }
             }
             override fun onResults(results: Bundle?) {
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                if (myGen != recognizerGeneration) { Log.d(TAG, "listenForQuestion: onResults ignored, superseded session"); return }
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().takeUnless { it.isNullOrBlank() } ?: lastPartialText
                 Log.d(TAG, "listenForQuestion: onResults text=$text")
                 Handler(Looper.getMainLooper()).post {
                     if (text.isNullOrBlank()) {
                         Toast.makeText(this@MainActivity, "Didn't catch that \u2014 try again.", Toast.LENGTH_SHORT).show()
-                        restartAutoListenIfEnabled()
+                        resumeIdleListening()
                     } else {
-                        questionInput.setText(text)
+                        questionInput.setText(stripWakeWordPrefix(text))
                         ask()
                         // If replies are spoken, restart happens after TTS finishes (see onCreate);
                         // otherwise there's no speaker output to avoid overhearing, so restart now.
-                        if (!speakRepliesToggle.isChecked) restartAutoListenIfEnabled()
+                        if (!speakRepliesToggle.isChecked) resumeIdleListening()
                     }
                 }
             }
             override fun onError(error: Int) {
+                if (myGen != recognizerGeneration) { Log.d(TAG, "listenForQuestion: onError ignored, superseded session"); return }
                 Log.d(TAG, "listenForQuestion: onError code=$error")
                 Handler(Looper.getMainLooper()).post {
                     Toast.makeText(this@MainActivity, "Speech recognition error ($error)", Toast.LENGTH_SHORT).show()
-                    restartAutoListenIfEnabled()
+                    resumeIdleListening()
                 }
             }
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBeginningOfSpeech() { Log.d(TAG, "listenForQuestion: onBeginningOfSpeech") }
+            private var lastRmsLog = 0L
+            override fun onRmsChanged(rmsdB: Float) {
+                orbView.pushAudioLevel(rmsdB)
+                val now = System.currentTimeMillis()
+                if (now - lastRmsLog > 500) { lastRmsLog = now; Log.d(TAG, "listenForQuestion: onRmsChanged rmsdB=$rmsdB") }
+            }
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
-            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEndOfSpeech() { Log.d(TAG, "listenForQuestion: onEndOfSpeech") }
+            override fun onPartialResults(partialResults: Bundle?) {
+                if (myGen != recognizerGeneration) return
+                val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                if (!text.isNullOrBlank()) { lastPartialText = text; Log.d(TAG, "listenForQuestion: onPartialResults text=$text") }
+            }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
 
         recognizer.startListening(intent)
+    }
+
+    /** After any question/answer cycle, resumes whichever idle-listening mode is enabled — Auto-listen's full-question loop, or the "Hey Wolfman" wake-word gate — never both at once since they share the one recognizer. */
+    private fun resumeIdleListening() {
+        when {
+            autoListenToggle.isChecked -> restartAutoListenIfEnabled()
+            wakeWordToggle.isChecked -> {
+                recreateSpeechRecognizer()
+                val genAtSchedule = recognizerGeneration
+                // Bails if some other listen call raced in during the delay — e.g. the user
+                // tapping Speak — instead of blindly restarting and stealing the recognizer back.
+                Handler(Looper.getMainLooper()).postDelayed({ if (genAtSchedule == recognizerGeneration) startWakeWordListening() }, 1800)
+            }
+        }
     }
 
     /** Restarts listening on its own after a pause long enough for the recognizer to fully reset (avoids ERROR_CLIENT from restarting too fast), only while Auto-listen stays checked. */
@@ -243,7 +337,89 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "restartAutoListenIfEnabled: autoListenToggle.isChecked=${autoListenToggle.isChecked}")
         if (!autoListenToggle.isChecked) return
         recreateSpeechRecognizer()
-        Handler(Looper.getMainLooper()).postDelayed({ if (autoListenToggle.isChecked) listenForQuestion() }, 1800)
+        val genAtSchedule = recognizerGeneration
+        Handler(Looper.getMainLooper()).postDelayed({ if (genAtSchedule == recognizerGeneration && autoListenToggle.isChecked) listenForQuestion() }, 1800)
+    }
+
+    /**
+     * Passive "Hey Wolfman" wake-word gate: listens continuously in short cycles doing
+     * nothing but watching for the wake phrase (checked against partial results too, since
+     * the final result is often empty — see `listenForQuestion`). Hearing it hands off
+     * straight into a real question capture via `listenForQuestion()`; otherwise it just
+     * quietly restarts itself, as long as the toggle stays checked.
+     */
+    private fun startWakeWordListening() {
+        if (!wakeWordToggle.isChecked) return
+        if (tts?.isSpeaking == true) {
+            val genAtSchedule = recognizerGeneration
+            Handler(Looper.getMainLooper()).postDelayed({ if (genAtSchedule == recognizerGeneration) startWakeWordListening() }, 700)
+            return
+        }
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+        // Always start from a guaranteed-fresh recognizer instance — see listenForQuestion().
+        recreateSpeechRecognizer()
+        val recognizer = speechRecognizer ?: return
+        val myGen = ++recognizerGeneration
+
+        fun wakeWordSaid(text: String?) = text != null && Regex("(?i)hey\\s*wolf\\s*man|\\bwolfman\\b").containsMatchIn(text)
+        var handled = false
+        fun wake(text: String?) {
+            if (handled) return
+            handled = true
+            Log.d(TAG, "startWakeWordListening: wake word heard, text=$text")
+            // Same-breath case ("Hey Wolfman, what's the weather") — strips the wake phrase and
+            // asks the remainder directly instead of starting a second listen cycle that would miss it.
+            val remainder = text?.let { stripWakeWordPrefix(it) }?.takeIf { it != text }
+            Handler(Looper.getMainLooper()).post {
+                if (!remainder.isNullOrBlank()) {
+                    Log.d(TAG, "startWakeWordListening: question captured in same breath: $remainder")
+                    questionInput.setText(remainder)
+                    ask()
+                } else {
+                    statusView.text = "Yes?"
+                    recreateSpeechRecognizer()
+                    val genAtSchedule = recognizerGeneration
+                    // A short but non-zero delay — restarting the recognizer immediately after
+                    // recreating it throws ERROR_CLIENT (same fix as Auto-listen's restart).
+                    Handler(Looper.getMainLooper()).postDelayed({ if (genAtSchedule == recognizerGeneration) listenForQuestion() }, 800)
+                }
+            }
+        }
+
+        recognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            // Deliberately does NOT act on the wake word here: tearing down this live
+            // session mid-utterance is exactly what discarded the rest of the sentence
+            // when the question was said in the same breath as "Hey Wolfman". Only the
+            // final onResults (after the recognizer's own end-of-speech) acts on it.
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onResults(results: Bundle?) {
+                if (myGen != recognizerGeneration) { Log.d(TAG, "startWakeWordListening: onResults ignored, superseded session"); return }
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                Log.d(TAG, "startWakeWordListening: onResults text=$text handled=$handled")
+                if (handled) return
+                if (wakeWordSaid(text)) { wake(text); return }
+                recreateSpeechRecognizer()
+                // 1800ms — the same delay Auto-listen needs to avoid ERROR_CLIENT; a shorter
+                // gap here (previously 300ms) got the recognizer stuck retrying and immediately
+                // failing with ERROR_NO_MATCH in a tight, self-sustaining loop.
+                Handler(Looper.getMainLooper()).postDelayed({ if (myGen == recognizerGeneration) startWakeWordListening() }, 1800)
+            }
+            override fun onError(error: Int) {
+                if (myGen != recognizerGeneration) { Log.d(TAG, "startWakeWordListening: onError ignored, superseded session"); return }
+                Log.d(TAG, "startWakeWordListening: onError code=$error handled=$handled")
+                if (handled) return
+                recreateSpeechRecognizer()
+                Handler(Looper.getMainLooper()).postDelayed({ if (myGen == recognizerGeneration) startWakeWordListening() }, 1800)
+            }
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+        runCatching { recognizer.startListening(speechRecognizerIntent()) }
+            .onFailure { Log.d(TAG, "startWakeWordListening: startListening threw: ${it.message}") }
     }
 
     /** Destroys and recreates the recognizer — reusing one instance across rapid restarts is what causes repeated ERROR_CLIENT (5). */
@@ -256,9 +432,15 @@ class MainActivity : AppCompatActivity() {
     private fun speechRecognizerIntent(): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 15000)
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        // Force cloud recognition \u2014 a broken/empty on-device offline model returns onResults
+        // with an empty result list instead of an error, which looks identical to "didn't catch that".
+        putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
+        // EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS broke recognition entirely on-device (always
+        // timed out with ERROR_NO_MATCH after exactly that long) \u2014 only the silence-length
+        // extras actually helped with cutting off too soon.
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000)
     }
 
     /**
@@ -270,11 +452,22 @@ class MainActivity : AppCompatActivity() {
      */
     private fun onTtsFinished(utteranceId: String?) {
         Log.d(TAG, "onTtsFinished utteranceId=$utteranceId pendingHandoffQuestion=$pendingHandoffQuestion")
+        orbView.setState(OrbState.IDLE)
         when (utteranceId) {
-            "wolfman-reply" -> restartAutoListenIfEnabled()
+            "wolfman-reply" -> resumeIdleListening()
             "wolfman-handoff" -> {
                 val question = pendingHandoffQuestion ?: return
-                Handler(Looper.getMainLooper()).postDelayed({ listenForAssistantReply(question) }, 3500)
+                val seqCallback = pendingSequentialHandoff
+                pendingSequentialHandoff = null
+                if (seqCallback != null) {
+                    pendingHandoffQuestion = null
+                    // No reply-capture here — give the assistant real time to actually finish
+                    // speaking its own answer aloud (8s cut off Google mid-reply in testing)
+                    // before Wolfman moves on to the next one in the sequence.
+                    Handler(Looper.getMainLooper()).postDelayed(seqCallback, 16000)
+                } else {
+                    Handler(Looper.getMainLooper()).postDelayed({ listenForAssistantReply(question) }, 3500)
+                }
             }
         }
     }
@@ -430,6 +623,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             val locals = detectLocalAll()
             val assistants = detectAssistants()
+            detectedAssistants = assistants
 
             Handler(Looper.getMainLooper()).post {
                 assistantButtons.removeAllViews()
@@ -481,6 +675,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         responseView.text = "Asking\u2026"
+        orbView.setState(OrbState.THINKING)
         Thread {
             val attempts = mutableListOf<String>()
             var answer: String? = null
@@ -539,10 +734,16 @@ class MainActivity : AppCompatActivity() {
 
             Handler(Looper.getMainLooper()).post {
                 responseView.text = finalText
-                if (speakRepliesToggle.isChecked) {
+                if (answer == null) {
+                    orbView.setState(OrbState.IDLE)
+                    autoHandOffToAssistants(question)
+                } else if (speakRepliesToggle.isChecked) {
+                    orbView.setState(OrbState.SPEAKING)
                     tts?.language = Locale.US
                     tts?.speak(finalText, TextToSpeech.QUEUE_FLUSH, null, "wolfman-reply")
                     startStopWordListener()
+                } else {
+                    orbView.setState(OrbState.IDLE)
                 }
             }
         }.start()
@@ -558,37 +759,62 @@ class MainActivity : AppCompatActivity() {
     private fun startStopWordListener() {
         if (tts?.isSpeaking != true) return
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+        // Always start from a guaranteed-fresh recognizer instance — see listenForQuestion().
+        recreateSpeechRecognizer()
         val recognizer = speechRecognizer ?: return
+        val myGen = ++recognizerGeneration
+
+        fun stopWordSaid(text: String?) = text != null && Regex("\\bstop\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)
+        var handled = false
 
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
+            // Check partials too — the final result frequently comes back empty even after a
+            // partial already captured "stop", so waiting for onResults alone can miss it.
+            override fun onPartialResults(partialResults: Bundle?) {
+                if (myGen != recognizerGeneration) return
+                val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                if (!handled && stopWordSaid(text)) {
+                    handled = true
+                    Log.d(TAG, "startStopWordListener: onPartialResults matched stop, text=$text")
+                    Handler(Looper.getMainLooper()).post {
+                        tts?.stop()
+                        statusView.text = "Stopped \u2014 listening\u2026"
+                        recreateSpeechRecognizer()
+                        listenForQuestion()
+                    }
+                }
+            }
             override fun onResults(results: Bundle?) {
+                if (myGen != recognizerGeneration) return
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                Log.d(TAG, "startStopWordListener: onResults text=$text")
+                Log.d(TAG, "startStopWordListener: onResults text=$text handled=$handled")
+                if (handled) return
                 Handler(Looper.getMainLooper()).post {
-                    if (text != null && Regex("\\bstop\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
+                    if (stopWordSaid(text)) {
                         tts?.stop()
                         statusView.text = "Stopped \u2014 listening\u2026"
                         recreateSpeechRecognizer()
                         listenForQuestion()
                     } else {
                         recreateSpeechRecognizer()
-                        startStopWordListener()
+                        Handler(Looper.getMainLooper()).postDelayed({ if (myGen == recognizerGeneration) startStopWordListener() }, 700)
                     }
                 }
             }
             override fun onError(error: Int) {
-                Log.d(TAG, "startStopWordListener: onError code=$error")
+                if (myGen != recognizerGeneration) return
+                Log.d(TAG, "startStopWordListener: onError code=$error handled=$handled")
+                if (handled) return
                 Handler(Looper.getMainLooper()).post {
                     recreateSpeechRecognizer()
-                    startStopWordListener()
+                    Handler(Looper.getMainLooper()).postDelayed({ if (myGen == recognizerGeneration) startStopWordListener() }, 700)
                 }
             }
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
         runCatching { recognizer.startListening(speechRecognizerIntent()) }
@@ -791,6 +1017,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * When no provider could answer, automatically asks every installed assistant in turn
+     * (Google first, then Alexa) instead of leaving the user with just a "no live source"
+     * message. Each one speaks its own real answer aloud in its own app/voice — Wolfman
+     * doesn't try to capture or read it back, it just gives it time to reply before moving
+     * on to the next one in the sequence.
+     */
+    private fun autoHandOffToAssistants(question: String) {
+        val order = listOf("com.google.android.googlequicksearchbox", "com.amazon.dee.app")
+        val candidates = order.mapNotNull { pkg -> detectedAssistants.firstOrNull { it.packageName == pkg } }
+        if (candidates.isEmpty()) return
+        Log.d(TAG, "autoHandOffToAssistants: sequence=${candidates.map { it.label }}")
+        autoHandOffStep(question, candidates, 0)
+    }
+
+    private fun autoHandOffStep(question: String, candidates: List<AssistantCandidate>, index: Int) {
+        if (index >= candidates.size) return
+        val assistant = candidates[index]
+        statusView.text = "Wolfman doesn't know \u2014 asking ${assistant.label}\u2026"
+        handOff(assistant, questionOverride = question) { autoHandOffStep(question, candidates, index + 1) }
+    }
+
+    /**
      * Real voice handoff, per assistant. Launches the assistant into its own
      * listening state (ACTION_VOICE_COMMAND when supported), then — after a
      * short warm-up delay — speaks the assistant's real wake phrase followed
@@ -802,23 +1050,24 @@ class MainActivity : AppCompatActivity() {
      * on a blind timer — so it can't cut off the assistant's own listening
      * session for the question you just asked it.
      */
-    private fun handOff(assistant: AssistantCandidate) {
-        val question = lastAskedQuestion ?: questionInput.text.toString().trim()
+    private fun handOff(assistant: AssistantCandidate, questionOverride: String? = null, then: (() -> Unit)? = null) {
+        val question = questionOverride ?: (lastAskedQuestion ?: questionInput.text.toString().trim())
         if (question.isEmpty()) {
             Toast.makeText(this, "Ask Wolfman something first.", Toast.LENGTH_SHORT).show()
             return
         }
         autoListenToggle.isChecked = false
+        wakeWordToggle.isChecked = false
         pendingHandoffQuestion = question
+        pendingSequentialHandoff = then
 
         if (assistant.canVoiceCommand) {
             Log.d(TAG, "handOff: launching ${assistant.packageName} via ACTION_VOICE_COMMAND")
             runCatching { startActivity(Intent(Intent.ACTION_VOICE_COMMAND).setPackage(assistant.packageName)) }
-                .onFailure { Log.d(TAG, "handOff: startActivity failed: ${it.message}"); Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show(); return }
+                .onFailure { Log.d(TAG, "handOff: startActivity failed: ${it.message}"); Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show(); then?.invoke(); return }
 
             val phrase = wakePhrases[assistant.packageName]
-            val askForSource = "$question, and please tell me what website or source that came from"
-            val utterance = if (phrase != null) "$phrase, $askForSource" else askForSource
+            val utterance = if (phrase != null) "$phrase, $question" else question
             Handler(Looper.getMainLooper()).postDelayed({
                 Log.d(TAG, "handOff: speaking utterance=$utterance")
                 // Max out media volume first: the assistant only hears this at all if its mic
@@ -826,6 +1075,7 @@ class MainActivity : AppCompatActivity() {
                 val audioManager = getSystemService(AUDIO_SERVICE) as? AudioManager
                 audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0)
                 tts?.language = Locale.US
+                orbView.setState(OrbState.SPEAKING)
                 val result = tts?.speak(utterance, TextToSpeech.QUEUE_FLUSH, null, "wolfman-handoff")
                 Log.d(TAG, "handOff: tts.speak() returned $result")
             }, 1300)
@@ -843,9 +1093,12 @@ class MainActivity : AppCompatActivity() {
             Intent(Intent.ACTION_ASSIST).setPackage(assistant.packageName)
         }
 
-        runCatching { startActivity(intent) }.onFailure {
-            Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show()
-        }
+        runCatching { startActivity(intent) }
+            .onSuccess { then?.let { cb -> Handler(Looper.getMainLooper()).postDelayed(cb, 16000) } }
+            .onFailure {
+                Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show()
+                then?.invoke()
+            }
     }
 
     /**
@@ -863,6 +1116,8 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Microphone permission is needed to learn from the reply.", Toast.LENGTH_LONG).show()
             return
         }
+        // Always start from a guaranteed-fresh recognizer instance — see listenForQuestion().
+        recreateSpeechRecognizer()
         val recognizer = speechRecognizer
         if (recognizer == null) {
             Log.d(TAG, "listenForAssistantReply: speechRecognizer is null")
@@ -871,14 +1126,18 @@ class MainActivity : AppCompatActivity() {
         }
 
         val intent = speechRecognizerIntent()
+        var lastPartialText: String? = null
+        val myGen = ++recognizerGeneration
 
         Toast.makeText(this, "Wolfman is listening for the reply\u2026", Toast.LENGTH_SHORT).show()
         recognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { Log.d(TAG, "listenForAssistantReply: onReadyForSpeech") }
+            override fun onReadyForSpeech(params: Bundle?) { Log.d(TAG, "listenForAssistantReply: onReadyForSpeech"); orbView.setState(OrbState.LISTENING) }
             override fun onResults(results: Bundle?) {
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                if (myGen != recognizerGeneration) return
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().takeUnless { it.isNullOrBlank() } ?: lastPartialText
                 Log.d(TAG, "listenForAssistantReply: onResults text=$text")
                 Handler(Looper.getMainLooper()).post {
+                    orbView.setState(OrbState.IDLE)
                     if (!text.isNullOrBlank()) {
                         recordLearning(question, text)
                         Toast.makeText(this@MainActivity, "Wolfman learned: \"$text\"", Toast.LENGTH_LONG).show()
@@ -888,16 +1147,21 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             override fun onError(error: Int) {
+                if (myGen != recognizerGeneration) return
                 Log.d(TAG, "listenForAssistantReply: onError code=$error")
                 Handler(Looper.getMainLooper()).post {
+                    orbView.setState(OrbState.IDLE)
                     Toast.makeText(this@MainActivity, "Didn't catch a reply to learn from (error $error).", Toast.LENGTH_SHORT).show()
                 }
             }
             override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onRmsChanged(rmsdB: Float) { orbView.pushAudioLevel(rmsdB) }
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onPartialResults(partialResults: Bundle?) {
+                val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                if (!text.isNullOrBlank()) lastPartialText = text
+            }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
 
