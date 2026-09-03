@@ -472,9 +472,9 @@ class MainActivity : AppCompatActivity() {
                 if (seqCallback != null) {
                     pendingHandoffQuestion = null
                     // No reply-capture here — give the assistant real time to actually finish
-                    // speaking its own answer aloud (8s, then 16s, both still cut Google off
+                    // speaking its own answer aloud (8s, 16s, then 26s all still cut Google off
                     // mid-reply in testing) before Wolfman moves on to the next one.
-                    Handler(Looper.getMainLooper()).postDelayed(seqCallback, 26000)
+                    Handler(Looper.getMainLooper()).postDelayed(seqCallback, 40000)
                 } else {
                     Handler(Looper.getMainLooper()).postDelayed({ listenForAssistantReply(question) }, 3500)
                 }
@@ -1133,7 +1133,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         runCatching { startActivity(intent) }
-            .onSuccess { then?.let { cb -> Handler(Looper.getMainLooper()).postDelayed(cb, 26000) } }
+            .onSuccess { then?.let { cb -> Handler(Looper.getMainLooper()).postDelayed(cb, 40000) } }
             .onFailure {
                 Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show()
                 then?.invoke()
