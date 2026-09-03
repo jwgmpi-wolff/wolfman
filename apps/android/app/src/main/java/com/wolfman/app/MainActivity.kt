@@ -471,15 +471,56 @@ class MainActivity : AppCompatActivity() {
                 pendingSequentialHandoff = null
                 if (seqCallback != null) {
                     pendingHandoffQuestion = null
-                    // No reply-capture here — give the assistant real time to actually finish
-                    // speaking its own answer aloud (8s, 16s, then 26s all still cut Google off
-                    // mid-reply in testing) before Wolfman moves on to the next one.
-                    Handler(Looper.getMainLooper()).postDelayed(seqCallback, 40000)
+                    // No reply-capture here — a fixed delay (tried 8s, 16s, 26s, 40s) either cut
+                    // the assistant off mid-reply or left an awkward silent gap, since real
+                    // answer length varies wildly. Wait for it to actually go quiet instead.
+                    waitForAssistantSpeechToFinish(seqCallback)
                 } else {
                     Handler(Looper.getMainLooper()).postDelayed({ listenForAssistantReply(question) }, 3500)
                 }
             }
         }
+    }
+
+    /**
+     * Waits for the handed-off assistant to actually finish speaking instead of guessing a fixed
+     * delay. There's no privileged permission to know exactly which app owns a given audio
+     * stream, so this polls system-wide active playback as the best available proxy — proceeds
+     * once it's been silent for a debounce window, with a hard cap so a failed detection (e.g.
+     * an assistant that never actually produces audible playback) can't hang forever.
+     */
+    private fun waitForAssistantSpeechToFinish(onDone: () -> Unit) {
+        val audioManager = getSystemService(AUDIO_SERVICE) as? AudioManager
+        if (audioManager == null) { Handler(Looper.getMainLooper()).postDelayed(onDone, 12000); return }
+
+        val handler = Handler(Looper.getMainLooper())
+        val startTime = System.currentTimeMillis()
+        val maxWaitMs = 60_000L
+        val silenceNeededMs = 1_500L
+        var sawPlayback = false
+        var lastActiveAt = System.currentTimeMillis()
+        var finished = false
+
+        lateinit var poll: Runnable
+        poll = Runnable {
+            if (finished) return@Runnable
+            val elapsed = System.currentTimeMillis() - startTime
+            val active = runCatching { audioManager.activePlaybackConfigurations.isNotEmpty() }.getOrDefault(false)
+            if (active) { sawPlayback = true; lastActiveAt = System.currentTimeMillis() }
+            val silentFor = System.currentTimeMillis() - lastActiveAt
+            when {
+                elapsed >= maxWaitMs -> {
+                    Log.d(TAG, "waitForAssistantSpeechToFinish: hit max wait, proceeding anyway")
+                    finished = true; onDone()
+                }
+                sawPlayback && !active && silentFor >= silenceNeededMs -> {
+                    Log.d(TAG, "waitForAssistantSpeechToFinish: assistant went quiet after ${elapsed}ms")
+                    finished = true; onDone()
+                }
+                else -> handler.postDelayed(poll, 300)
+            }
+        }
+        handler.postDelayed(poll, 300)
     }
 
     /** Loads the MSAL app once; restores a cached sign-in silently if one exists. */
@@ -1133,7 +1174,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         runCatching { startActivity(intent) }
-            .onSuccess { then?.let { cb -> Handler(Looper.getMainLooper()).postDelayed(cb, 40000) } }
+            .onSuccess { then?.let { cb -> waitForAssistantSpeechToFinish(cb) } }
             .onFailure {
                 Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show()
                 then?.invoke()
