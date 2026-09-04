@@ -152,9 +152,7 @@ class MainActivity : AppCompatActivity() {
                 Handler(Looper.getMainLooper()).post { onTtsFinished(utteranceId) }
             }
         })
-        if (SpeechRecognizer.isRecognitionAvailable(this)) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-        }
+        speechRecognizer = createWolfmanSpeechRecognizer()
         initAzureSignIn()
 
         val root = LinearLayout(this).apply {
@@ -549,7 +547,19 @@ class MainActivity : AppCompatActivity() {
     /** Destroys and recreates the recognizer — reusing one instance across rapid restarts is what causes repeated ERROR_CLIENT (5). */
     private fun recreateSpeechRecognizer() {
         speechRecognizer?.destroy()
-        speechRecognizer = if (SpeechRecognizer.isRecognitionAvailable(this)) SpeechRecognizer.createSpeechRecognizer(this) else null
+        speechRecognizer = createWolfmanSpeechRecognizer()
+    }
+
+    private fun createWolfmanSpeechRecognizer(): SpeechRecognizer? {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) return null
+        return if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+        ) {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+        } else {
+            SpeechRecognizer.createSpeechRecognizer(this)
+        }
     }
 
     private fun stopListening() {
