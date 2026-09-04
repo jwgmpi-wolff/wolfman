@@ -547,6 +547,13 @@ class MainActivity : AppCompatActivity() {
         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000)
     }
 
+    private fun assistantReplyIntent(): Intent = speechRecognizerIntent().apply {
+        // Assistant answers naturally contain pauses between clauses. Keep the response
+        // capture alive longer than a wake-word or user-question recognition session.
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 7000)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 5000)
+    }
+
     /**
      * Fires once Wolfman's own TTS actually finishes speaking (never on a
      * blind timer). For a normal reply, resumes Auto-listen. For a handoff,
@@ -1370,9 +1377,23 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val intent = speechRecognizerIntent()
+        val intent = assistantReplyIntent()
         var lastPartialText: String? = null
         val myGen = ++recognizerGeneration
+        var retries = 0
+
+        fun finish(text: String?) {
+            Handler(Looper.getMainLooper()).post {
+                orbView.setState(OrbState.IDLE)
+                restoreListeningAfterHandoff()
+                if (!text.isNullOrBlank()) {
+                    recordLearning(question, text)
+                    Toast.makeText(this@MainActivity, "Wolfman learned: \"$text\"", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this@MainActivity, "Didn't catch a reply to learn from.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
 
         Toast.makeText(this, "Wolfman is listening for the reply\u2026", Toast.LENGTH_SHORT).show()
         recognizer.setRecognitionListener(object : RecognitionListener {
@@ -1381,24 +1402,19 @@ class MainActivity : AppCompatActivity() {
                 if (myGen != recognizerGeneration) return
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().takeUnless { it.isNullOrBlank() } ?: lastPartialText
                 Log.d(TAG, "listenForAssistantReply: onResults text=$text")
-                Handler(Looper.getMainLooper()).post {
-                    orbView.setState(OrbState.IDLE)
-                    restoreListeningAfterHandoff()
-                    if (!text.isNullOrBlank()) {
-                        recordLearning(question, text)
-                        Toast.makeText(this@MainActivity, "Wolfman learned: \"$text\"", Toast.LENGTH_LONG).show()
-                    } else {
-                        Toast.makeText(this@MainActivity, "Didn't catch a reply to learn from.", Toast.LENGTH_SHORT).show()
-                    }
-                }
+                finish(text)
             }
             override fun onError(error: Int) {
                 if (myGen != recognizerGeneration) return
                 Log.d(TAG, "listenForAssistantReply: onError code=$error")
-                Handler(Looper.getMainLooper()).post {
-                    orbView.setState(OrbState.IDLE)
-                    restoreListeningAfterHandoff()
-                    Toast.makeText(this@MainActivity, "Didn't catch a reply to learn from (error $error).", Toast.LENGTH_SHORT).show()
+                if (!lastPartialText.isNullOrBlank()) {
+                    finish(lastPartialText)
+                } else if (retries++ < 2 && (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_CLIENT)) {
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        if (myGen == recognizerGeneration) runCatching { recognizer.startListening(intent) }
+                    }, 1500)
+                } else {
+                    finish(null)
                 }
             }
             override fun onBeginningOfSpeech() {}
