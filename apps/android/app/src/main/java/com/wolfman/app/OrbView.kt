@@ -17,8 +17,8 @@ enum class OrbState { IDLE, LISTENING, THINKING, SPEAKING }
 
 /**
  * A glowing particle-cloud orb (Jarvis-style) that visibly reacts to Wolfman's state: gentle
- * drift when idle, pulses with your real mic input level while listening, a faster swirl while
- * thinking, and a rhythmic pulse while speaking a reply. Throttled to ~30fps with a cached glow
+ * stays still while idle, reacts to real mic input while recognizing, swirls while
+ * preparing a response, and pulses without rotating while speaking. Throttled to ~30fps with a cached glow
  * shader — recreating the shader and redrawing at full vsync rate every frame previously made
  * the whole UI thread janky enough to feel unresponsive.
  */
@@ -84,10 +84,10 @@ class OrbView(context: Context, attrs: AttributeSet? = null) : View(context, att
         canvas.drawColor(BACKGROUND_COLOR)
 
         val (pulse, spin, glowColor) = when (state) {
-            OrbState.IDLE -> Triple(1f + 0.03f * sin(phase * 1.2f), 3f, IDLE_COLOR)
+            OrbState.IDLE -> Triple(1f, 0f, IDLE_COLOR)
             OrbState.LISTENING -> Triple(1f + 0.18f * audioLevel + 0.03f * sin(phase * 3f), 8f + audioLevel * 18f, LISTENING_COLOR)
             OrbState.THINKING -> Triple(1f + 0.07f * sin(phase * 4f), 34f, THINKING_COLOR)
-            OrbState.SPEAKING -> Triple(1f + 0.09f * (0.5f + 0.5f * sin(phase * 6f)), 22f, SPEAKING_COLOR)
+            OrbState.SPEAKING -> Triple(1f + 0.09f * (0.5f + 0.5f * sin(phase * 6f)), 0f, SPEAKING_COLOR)
         }
 
         val glowRadius = baseRadius * 2.3f * pulse
