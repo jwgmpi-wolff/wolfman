@@ -543,15 +543,15 @@ class MainActivity : AppCompatActivity() {
         // EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS broke recognition entirely on-device (always
         // timed out with ERROR_NO_MATCH after exactly that long) \u2014 only the silence-length
         // extras actually helped with cutting off too soon.
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 5000)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3500)
     }
 
     private fun assistantReplyIntent(): Intent = speechRecognizerIntent().apply {
         // Assistant answers naturally contain pauses between clauses. Keep the response
         // capture alive longer than a wake-word or user-question recognition session.
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 7000)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 5000)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 12000)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 8000)
     }
 
     /**
