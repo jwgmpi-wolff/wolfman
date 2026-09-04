@@ -799,7 +799,7 @@ class MainActivity : AppCompatActivity() {
             requestMethod = "POST"
             doOutput = true
             connectTimeout = 10_000
-            readTimeout = 90_000
+            readTimeout = 25_000
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Authorization", "Bearer $token")
         }
@@ -964,6 +964,10 @@ class MainActivity : AppCompatActivity() {
         val question = questionInput.text.toString().trim()
         if (question.isEmpty()) return
         lastAskedQuestion = question
+        val selectedVoiceOnlyProvider = listOf(
+            routingPrefs().getString("primary", "auto"),
+            routingPrefs().getString("next", "auto"),
+        ).any { it?.startsWith("assistant:") == true }
 
         // Carries the last few turns along so a short follow-up ("yes", "try that") lands
         // as a continuation of the same exchange instead of an unrelated new request.
@@ -978,6 +982,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         responseView.text = "Asking\u2026"
+        if (isSilentMode() && selectedVoiceOnlyProvider) {
+            statusView.text = "Silent mode: using a text provider instead of voice handoff"
+        }
         orbView.setState(OrbState.THINKING)
         Thread {
             val attempts = mutableListOf<String>()
