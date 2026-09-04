@@ -477,7 +477,7 @@ class MainActivity : AppCompatActivity() {
         val recognizer = speechRecognizer ?: return
         val myGen = ++recognizerGeneration
 
-        fun wakeWordSaid(text: String?) = text != null && Regex("(?i)^\\s*hey\\s+wolf\\s*man(?:\\b|[,.!?])").containsMatchIn(text)
+        fun wakeWordSaid(text: String?) = text != null && Regex("(?i)^\\s*(?:hey\\s+)?wolf\\s*man(?:\\b|[,.!?])").containsMatchIn(text)
         var handled = false
         var lastPartialText: String? = null
         fun wake(text: String?) {
@@ -508,7 +508,10 @@ class MainActivity : AppCompatActivity() {
             override fun onPartialResults(partialResults: Bundle?) {
                 if (myGen != recognizerGeneration || handled) return
                 val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                if (!text.isNullOrBlank()) lastPartialText = text
+                if (!text.isNullOrBlank()) {
+                    lastPartialText = text
+                    Log.d(TAG, "startWakeWordListening: onPartialResults text=$text")
+                }
             }
             override fun onResults(results: Bundle?) {
                 if (myGen != recognizerGeneration) { Log.d(TAG, "startWakeWordListening: onResults ignored, superseded session"); return }
@@ -539,7 +542,7 @@ class MainActivity : AppCompatActivity() {
             override fun onEndOfSpeech() {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
-        runCatching { recognizer.startListening(speechRecognizerIntent()) }
+        runCatching { recognizer.startListening(wakeWordIntent()) }
             .onFailure { Log.d(TAG, "startWakeWordListening: startListening threw: ${it.message}") }
     }
 
@@ -576,6 +579,15 @@ class MainActivity : AppCompatActivity() {
         // capture alive longer than a wake-word or user-question recognition session.
         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 12000)
         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 8000)
+    }
+
+    private fun wakeWordIntent(): Intent = speechRecognizerIntent().apply {
+        // The on-device recognizer has lower startup latency for the short wake phrase and
+        // remains available when the network recognizer fails to produce a transcript.
+        putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200)
     }
 
     /**
