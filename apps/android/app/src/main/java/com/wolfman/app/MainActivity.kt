@@ -1412,15 +1412,33 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val intent = if (assistant.canProcessText) {
-            Intent(Intent.ACTION_PROCESS_TEXT).apply {
-                type = "text/plain"
-                setPackage(assistant.packageName)
-                putExtra(Intent.EXTRA_PROCESS_TEXT, question)
-                putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true)
+        if (!assistant.canProcessText) {
+            val launchIntent = packageManager.getLaunchIntentForPackage(assistant.packageName)
+            if (launchIntent == null) {
+                Toast.makeText(this, "${assistant.label} has no launchable activity.", Toast.LENGTH_LONG).show()
+                restoreListeningAfterHandoff()
+                return
             }
-        } else {
-            Intent(Intent.ACTION_ASSIST).setPackage(assistant.packageName)
+            runCatching { startActivity(launchIntent) }
+                .onSuccess {
+                    statusView.text = "${assistant.label} opened. Enter the question there."
+                    Toast.makeText(this, "${assistant.label} does not provide an Android handoff API.", Toast.LENGTH_LONG).show()
+                    pendingHandoffQuestion = null
+                    pendingSequentialHandoff = null
+                    restoreListeningAfterHandoff()
+                }
+                .onFailure {
+                    Toast.makeText(this, "Could not launch ${assistant.label}: ${it.message}", Toast.LENGTH_LONG).show()
+                    restoreListeningAfterHandoff()
+                }
+            return
+        }
+
+        val intent = Intent(Intent.ACTION_PROCESS_TEXT).apply {
+            type = "text/plain"
+            setPackage(assistant.packageName)
+            putExtra(Intent.EXTRA_PROCESS_TEXT, question)
+            putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true)
         }
 
         runCatching { startActivity(intent) }
