@@ -491,12 +491,16 @@ class MainActivity : AppCompatActivity() {
                     questionInput.setText(remainder)
                     ask()
                 } else {
-                    statusView.text = "Yes?"
                     recreateSpeechRecognizer()
-                    val genAtSchedule = recognizerGeneration
-                    // A short but non-zero delay — restarting the recognizer immediately after
-                    // recreating it throws ERROR_CLIENT (same fix as Auto-listen's restart).
-                    Handler(Looper.getMainLooper()).postDelayed({ if (genAtSchedule == recognizerGeneration) listenForQuestion() }, 800)
+                    statusView.text = "I am here"
+                    if (isSilentMode()) {
+                        val genAtSchedule = recognizerGeneration
+                        Handler(Looper.getMainLooper()).postDelayed({ if (genAtSchedule == recognizerGeneration) listenForQuestion() }, 500)
+                    } else {
+                        orbView.setState(OrbState.SPEAKING)
+                        val result = tts?.speak("I am here", TextToSpeech.QUEUE_FLUSH, null, "wolfman-wake")
+                        if (result != TextToSpeech.SUCCESS) listenForQuestion()
+                    }
                 }
             }
         }
@@ -612,6 +616,7 @@ class MainActivity : AppCompatActivity() {
         orbView.setState(OrbState.IDLE)
         when (utteranceId) {
             "wolfman-reply" -> resumeIdleListening()
+            "wolfman-wake" -> listenForQuestion()
             "wolfman-handoff" -> {
                 val question = pendingHandoffQuestion ?: return
                 val seqCallback = pendingSequentialHandoff
