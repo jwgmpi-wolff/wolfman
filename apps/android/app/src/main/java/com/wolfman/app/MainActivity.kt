@@ -885,16 +885,29 @@ class MainActivity : AppCompatActivity() {
     private fun routeIds(locals: List<LocalProvider>): List<String> {
         val prefs = routingPrefs()
         val cloudAllowed = prefs.getString("accessMode", "Device") == "Cloud"
+        val silent = isSilentMode()
         val available = buildList<String> {
             locals.forEach { add("local:${it.baseUrl}") }
             if (cloudAllowed) {
                 add("azure")
                 add("web")
             }
-            detectedAssistants.forEach { add("assistant:${it.packageName}") }
+            if (!silent) detectedAssistants.forEach { add("assistant:${it.packageName}") }
         }
-        val preferredIds = listOf(prefs.getString("primary", "auto"), prefs.getString("next", "auto"))
+        val selectedIds = listOf(prefs.getString("primary", "auto"), prefs.getString("next", "auto"))
             .filterNotNull().filter { it != "auto" }.distinct()
+        // Copilot, Gemini, and Alexa cannot return an answer to another Android app. In
+        // silent mode, replace those voice-only selections with real text-capable routes.
+        val preferredIds = buildList {
+            selectedIds.forEach { id ->
+                if (silent && id.startsWith("assistant:")) {
+                    if (cloudAllowed) add("azure")
+                    if (cloudAllowed) add("web")
+                } else {
+                    add(id)
+                }
+            }
+        }.distinct()
         val ordered = preferredIds.filter { it in available } + available.filter { it !in preferredIds }
         return ordered.take(when (prefs.getString("pollDepth", "All")) { "1" -> 1; "2" -> 2; else -> ordered.size })
     }
