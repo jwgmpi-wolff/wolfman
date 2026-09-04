@@ -1231,6 +1231,25 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
+        // Some assistants, including Copilot, do not register ACTION_ASSIST even when
+        // installed. Package visibility is declared in the manifest, so include them as
+        // selectable handoff targets when Android confirms their package is present.
+        val knownAssistants = listOf(
+            "com.microsoft.copilot" to "Copilot",
+            "com.google.android.googlequicksearchbox" to "Gemini",
+            "com.amazon.dee.app" to "Alexa",
+        )
+        for ((pkg, fallbackName) in knownAssistants) {
+            if (found.containsKey(pkg)) continue
+            val installed = runCatching { packageManager.getApplicationInfo(pkg, 0) }.getOrNull() ?: continue
+            found[pkg] = AssistantCandidate(
+                installed.loadLabel(packageManager).toString().ifBlank { fallbackName },
+                pkg,
+                canProcessText = resolvesProcessText(pkg),
+                canVoiceCommand = resolvesVoiceCommand(pkg),
+            )
+        }
+
         return found.values.toList()
     }
 
