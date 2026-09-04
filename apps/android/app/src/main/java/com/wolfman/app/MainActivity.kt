@@ -386,8 +386,18 @@ class MainActivity : AppCompatActivity() {
                 if (myGen != recognizerGeneration) { Log.d(TAG, "listenForQuestion: onError ignored, superseded session"); return }
                 Log.d(TAG, "listenForQuestion: onError code=$error")
                 Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(this@MainActivity, speechErrorMessage(error), Toast.LENGTH_LONG).show()
-                    resumeIdleListening()
+                    // Recognition services commonly report NO_MATCH or SPEECH_TIMEOUT after
+                    // ordinary room noise. A partial transcript is still a real utterance and
+                    // should become the request; an empty normal timeout is silent.
+                    if (!lastPartialText.isNullOrBlank()) {
+                        questionInput.setText(stripWakeWordPrefix(lastPartialText!!))
+                        ask()
+                    } else if (error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                        Toast.makeText(this@MainActivity, speechErrorMessage(error), Toast.LENGTH_LONG).show()
+                    }
+                    if (lastPartialText.isNullOrBlank() || !speakRepliesToggle.isChecked || isSilentMode()) {
+                        resumeIdleListening()
+                    }
                 }
             }
             override fun onBeginningOfSpeech() { Log.d(TAG, "listenForQuestion: onBeginningOfSpeech") }
