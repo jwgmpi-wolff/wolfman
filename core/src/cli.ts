@@ -117,6 +117,17 @@ async function main() {
     return;
   }
 
+  if (cmd === 'silent') {
+    const store = new SettingsStore(settingsFile);
+    const settings = await store.load();
+    if (args[1] === 'on' || args[1] === 'off') {
+      settings.silentMode = args[1] === 'on';
+      await store.save(settings);
+    }
+    console.log(jsonMode ? JSON.stringify(settings) : `Silent mode: ${settings.silentMode ? 'on' : 'off'}`);
+    return;
+  }
+
   if (cmd === 'settings') {
     const store = new SettingsStore(settingsFile);
     const settings = await store.load();
@@ -206,7 +217,7 @@ async function main() {
     }
 
     const settings = await settingsStore.load();
-    if (settings.speakRepliesEnabled) {
+    if (settings.speakRepliesEnabled && !settings.silentMode) {
       try {
         await createNativeTts().speak(res.text, AbortSignal.timeout(60000));
       } catch (speakError) {

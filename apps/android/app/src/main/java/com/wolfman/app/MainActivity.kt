@@ -98,6 +98,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var questionInput: EditText
     private lateinit var orbView: OrbView
     private lateinit var speakRepliesToggle: CheckBox
+    private lateinit var silentModeToggle: CheckBox
     private lateinit var autoListenToggle: CheckBox
     private lateinit var wakeWordToggle: CheckBox
     private lateinit var azureSignInButton: Button
@@ -127,6 +128,8 @@ class MainActivity : AppCompatActivity() {
     private var updatingProviderPickers = false
 
     private fun voicePrefs(): SharedPreferences = getSharedPreferences("wolfman_voice", MODE_PRIVATE)
+
+    private fun isSilentMode(): Boolean = voicePrefs().getBoolean("silentMode", true)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -167,7 +170,8 @@ class MainActivity : AppCompatActivity() {
         questionInput = EditText(this).apply { hint = "Ask Wolfman\u2026" }
         val askButton = Button(this).apply { text = "Ask" }
         val speakButton = Button(this).apply { text = "\uD83C\uDFA4 Speak" }
-        speakRepliesToggle = CheckBox(this).apply { text = "Speak replies aloud"; isChecked = true }
+        speakRepliesToggle = CheckBox(this).apply { text = "Speak replies aloud"; isChecked = !isSilentMode() }
+        silentModeToggle = CheckBox(this).apply { text = "Silent mode"; isChecked = isSilentMode() }
         autoListenToggle = CheckBox(this).apply {
             text = "Continuous listening"
             isChecked = voicePrefs().getBoolean("continuousListening", false)
@@ -192,6 +196,16 @@ class MainActivity : AppCompatActivity() {
 
         askButton.setOnClickListener { ask() }
         speakButton.setOnClickListener { listenForQuestion() }
+        silentModeToggle.setOnCheckedChangeListener { _, silent ->
+            voicePrefs().edit().putBoolean("silentMode", silent).apply()
+            if (silent) {
+                tts?.stop()
+                speakRepliesToggle.isChecked = false
+            }
+        }
+        speakRepliesToggle.setOnCheckedChangeListener { _, speak ->
+            if (speak) silentModeToggle.isChecked = false
+        }
         azureSignInButton.setOnClickListener { signInToAzure() }
         saveRoutingButton.setOnClickListener {
             saveRoutingPreferences()
@@ -235,6 +249,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(questionInput)
         root.addView(askButton)
         root.addView(speakButton)
+        root.addView(silentModeToggle)
         root.addView(speakRepliesToggle)
         root.addView(autoListenToggle)
         root.addView(wakeWordToggle)
@@ -935,7 +950,7 @@ class MainActivity : AppCompatActivity() {
                 if (answer == null) {
                     orbView.setState(OrbState.IDLE)
                     handOffSelectedAssistants(question, selectedAssistantHandoffs(locals))
-                } else if (speakRepliesToggle.isChecked) {
+                } else if (speakRepliesToggle.isChecked && !isSilentMode()) {
                     orbView.setState(OrbState.SPEAKING)
                     tts?.language = Locale.US
                     tts?.speak(finalText, TextToSpeech.QUEUE_FLUSH, null, "wolfman-reply")
@@ -1276,6 +1291,11 @@ class MainActivity : AppCompatActivity() {
      * session for the question you just asked it.
      */
     private fun handOff(assistant: AssistantCandidate, questionOverride: String? = null, then: (() -> Unit)? = null) {
+        if (isSilentMode()) {
+            Toast.makeText(this, "Silent mode is on. Turn it off to hand off by voice.", Toast.LENGTH_SHORT).show()
+            then?.invoke()
+            return
+        }
         val question = questionOverride ?: (lastAskedQuestion ?: questionInput.text.toString().trim())
         if (question.isEmpty()) {
             Toast.makeText(this, "Ask Wolfman something first.", Toast.LENGTH_SHORT).show()

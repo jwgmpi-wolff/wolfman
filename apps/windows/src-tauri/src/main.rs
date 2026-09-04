@@ -220,6 +220,11 @@ fn microsoft_auth(app: AppHandle) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
+fn set_silent_mode(app: AppHandle, enabled: bool) -> Result<serde_json::Value, String> {
+    run_cli_json(&app, &["silent", if enabled { "on" } else { "off" }])
+}
+
+#[tauri::command]
 fn set_provider_routing(
     app: AppHandle,
     provider_ids: Vec<String>,
@@ -246,7 +251,7 @@ fn hide_overlay(app: AppHandle) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![ask, providers, microsoft_auth, set_provider_routing, hide_overlay])
+        .invoke_handler(tauri::generate_handler![ask, providers, microsoft_auth, set_silent_mode, set_provider_routing, hide_overlay])
         .setup(|app| {
             app.global_shortcut().on_shortcut(
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space),

@@ -42,6 +42,7 @@
   }
   .providers[hidden] { display: none; }
   .providers label { display: grid; gap: 4px; color: var(--dim); font-size: 12px; }
+  .providers label.toggle { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--fg); }
   .providers select { width: 100%; }
   @media (max-width: 820px) { .providers { grid-template-columns: 1fr 1fr; } }
   .provider-status { grid-column: 1 / -1; min-height: 18px; color: var(--dim); font-size: 12px; }
@@ -78,6 +79,7 @@
       <label>Next<select id="nextProvider"></select></label>
       <label>Poll<select id="pollDepth"><option value="1">1</option><option value="2">2</option><option value="all">All</option></select></label>
       <label>Access<select id="operatingMode"><option value="standalone">Device</option><option value="mesh">Mesh</option><option value="connected">Cloud</option></select></label>
+      <label class="toggle"><input id="silentMode" type="checkbox" /> Silent mode</label>
       <button id="saveProviders" type="button">Save</button>
       <button id="microsoftAuth" type="button">Sign in to Microsoft</button>
       <div class="provider-status" id="providerStatus"></div>
@@ -123,6 +125,7 @@ async function loadProviders() {
     $('nextProvider').innerHTML = providerOptions(live, order[1] ?? '');
     $('pollDepth').value = String(result.settings?.maxProviderAttempts ?? 'all');
     $('operatingMode').value = result.settings?.mode ?? 'standalone';
+    $('silentMode').checked = result.settings?.silentMode ?? true;
     $('providerStatus').textContent = live.length
       ? `${live.length} provider option${live.length === 1 ? '' : 's'} available.`
       : 'No configured or reachable provider is available.';
@@ -186,6 +189,15 @@ $('microsoftAuth').addEventListener('click', async () => {
     $('providerStatus').textContent = 'Microsoft sign-in complete. Refreshing providers...';
     await loadProviders();
   } catch (error) {
+    $('providerStatus').textContent = String(error);
+  }
+});
+
+$('silentMode').addEventListener('change', async () => {
+  try {
+    await invoke('set_silent_mode', { enabled: $('silentMode').checked });
+  } catch (error) {
+    $('silentMode').checked = !$('silentMode').checked;
     $('providerStatus').textContent = String(error);
   }
 });

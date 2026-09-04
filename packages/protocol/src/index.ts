@@ -49,6 +49,8 @@ export interface WolfmanSettings {
   learningEnabled: boolean;
   /** Opt-in: read every answer aloud through an on-device TTS engine as it's delivered. */
   speakRepliesEnabled: boolean;
+  /** Suppresses all response and handoff audio while retaining visual interaction. */
+  silentMode: boolean;
   /** Providers to try first, in handoff order. Unlisted live providers remain fallbacks. */
   preferredProviderIds: string[];
   /** Maximum number of reasoning providers attempted for one request. */
@@ -60,6 +62,7 @@ export const DEFAULT_WOLFMAN_SETTINGS: WolfmanSettings = {
   lockToDevice: false,
   learningEnabled: true,
   speakRepliesEnabled: false,
+  silentMode: true,
   preferredProviderIds: [],
   maxProviderAttempts: 'all',
 };
