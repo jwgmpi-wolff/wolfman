@@ -126,6 +126,7 @@ class MainActivity : AppCompatActivity() {
     private val conversationHistory = mutableListOf<Pair<String, String>>()
     private var providerChoices: List<ProviderChoice> = emptyList()
     private var updatingProviderPickers = false
+    private var consecutiveListenFailures = 0
 
     private fun voicePrefs(): SharedPreferences = getSharedPreferences("wolfman_voice", MODE_PRIVATE)
 
@@ -324,12 +325,17 @@ class MainActivity : AppCompatActivity() {
         return remainder?.takeIf { it.isNotBlank() } ?: text
     }
 
-    /** Error 11 (SERVER_DISCONNECTED) means the on-device speech service itself crashed — no app
-     * can force-restart another app's process, so the only real fix is a phone reboot. Naming
-     * that plainly beats a bare error code the user has no way to act on. */
+    /** The Android speech service can reconnect after an interrupted recognition session. */
     private fun speechErrorMessage(error: Int): String = when (error) {
-        11 -> "Speech service disconnected \u2014 try rebooting your phone if this keeps happening."
+        SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "Speech service disconnected \u2014 Wolfman is reconnecting."
         else -> "Speech recognition error ($error)"
+    }
+
+    private fun fallBackToWakeListening() {
+        if (!autoListenToggle.isChecked) return
+        autoListenToggle.isChecked = false
+        wakeWordToggle.isChecked = true
+        statusView.text = "Continuous listening paused \u2014 waiting for Hey Wolfman"
     }
 
     private fun listenForQuestion() {
@@ -367,6 +373,7 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onResults(results: Bundle?) {
                 if (myGen != recognizerGeneration) { Log.d(TAG, "listenForQuestion: onResults ignored, superseded session"); return }
+                consecutiveListenFailures = 0
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().takeUnless { it.isNullOrBlank() } ?: lastPartialText
                 Log.d(TAG, "listenForQuestion: onResults text=$text")
                 Handler(Looper.getMainLooper()).post {
@@ -390,9 +397,16 @@ class MainActivity : AppCompatActivity() {
                     // ordinary room noise. A partial transcript is still a real utterance and
                     // should become the request; an empty normal timeout is silent.
                     if (!lastPartialText.isNullOrBlank()) {
+                        consecutiveListenFailures = 0
                         questionInput.setText(stripWakeWordPrefix(lastPartialText!!))
                         ask()
-                    } else if (error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    } else if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                        consecutiveListenFailures++
+                        if (consecutiveListenFailures >= 3) fallBackToWakeListening()
+                    } else if (error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED) {
+                        statusView.text = speechErrorMessage(error)
+                        recreateSpeechRecognizer()
+                    } else {
                         Toast.makeText(this@MainActivity, speechErrorMessage(error), Toast.LENGTH_LONG).show()
                     }
                     if (lastPartialText.isNullOrBlank() || !speakRepliesToggle.isChecked || isSilentMode()) {
