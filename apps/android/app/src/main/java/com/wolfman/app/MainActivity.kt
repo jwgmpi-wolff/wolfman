@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -478,6 +479,8 @@ class MainActivity : AppCompatActivity() {
         fun wakeWordSaid(text: String?) = text != null && Regex("(?i)^\\s*(?:hey\\s+)?wolf\\s*man(?:\\b|[,.!?])").containsMatchIn(text)
         var handled = false
         var lastPartialText: String? = null
+        var speechStartedAt = 0L
+        var lastSpeechDurationMs = 0L
         fun wake(text: String?) {
             if (handled) return
             handled = true
@@ -535,13 +538,24 @@ class MainActivity : AppCompatActivity() {
                 // is still a live transcription, so recover it here rather than losing a wake
                 // phrase or a same-breath question.
                 if (wakeWordSaid(lastPartialText)) { wake(lastPartialText); return }
+                // Some Android on-device recognition services report their own internal
+                // hypotheses but never deliver any transcript callback to the client. In that
+                // narrow failure case, use a short spoken-utterance window as a wake fallback:
+                // it catches a normal wake phrase while ignoring brief alerts and long speech.
+                if (lastSpeechDurationMs in 500L..3000L) {
+                    Log.d(TAG, "startWakeWordListening: transcript-free wake fallback after ${lastSpeechDurationMs}ms")
+                    wake(null)
+                    return
+                }
                 recreateSpeechRecognizer()
                 Handler(Looper.getMainLooper()).postDelayed({ if (myGen == recognizerGeneration) startWakeWordListening() }, 1800)
             }
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() { speechStartedAt = SystemClock.elapsedRealtime() }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
+            override fun onEndOfSpeech() {
+                if (speechStartedAt > 0L) lastSpeechDurationMs = SystemClock.elapsedRealtime() - speechStartedAt
+            }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
         runCatching { recognizer.startListening(wakeWordIntent()) }
