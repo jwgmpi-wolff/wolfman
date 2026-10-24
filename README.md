@@ -4,6 +4,20 @@ A personal, cross-device AI orchestrator. It discovers the AI apps and model run
 
 It answers questions, gives advice, runs analysis, works through strategy, and looks up general public information (directions, phone numbers, hours, addresses).
 
+<!-- project-downloads:start -->
+## APK and installer downloads
+
+| Package | Download | Source |
+| --- | --- | --- |
+| Windows installer | [Wolfman-Setup-Windows.exe](https://github.com/jwgmpi-wolff/wolfman/releases/download/wolfman-v0.0.0/Wolfman-Setup-Windows.exe) | wolfman-v0.0.0 |
+| Android APK (debug build) | [wolfman-android-debug.apk](https://github.com/jwgmpi-wolff/wolfman/raw/refs/heads/main/releases/wolfman-android-debug.apk) | repository package |
+| Windows installer | [wolfman-windows-arm64-setup.exe](https://github.com/jwgmpi-wolff/wolfman/raw/refs/heads/main/releases/wolfman-windows-arm64-setup.exe) | repository package |
+
+Android may require approval to install apps from this download source. Debug APKs are labeled above. Windows executables that are not setup packages may require accompanying project files; follow the project-specific instructions below.
+
+- [Download the complete source ZIP](https://github.com/jwgmpi-wolff/wolfman/archive/refs/heads/main.zip).
+<!-- project-downloads:end -->
+
 ## The two rules
 
 **1. Everything is live.** Every answer comes from a call executed at request time — a model inference, an MCP tool call, or a web fetch. There are no canned answers, no sample data, no fixtures, no seeded records anywhere in this codebase. When nothing is reachable, Wolfman returns `NO_LIVE_SOURCE` with the full list of providers it tried and exactly why each one failed. It never fills the gap from memory.
@@ -101,3 +115,8 @@ Pre-wake-word audio lives in a fixed-size ring buffer that is continuously overw
 
 Each device runs the daemon, exposing `wolfman.ask` and `wolfman.providers` over MCP. Peers are found via mDNS, paired once with a short code, then talk over mTLS with pinned certs. Offline devices are simply absent from the pool — nothing is queued and nothing is faked.
 
+## Copyright
+
+Copyright (c) 2026 Jerry Wolff. See [COPYRIGHT](COPYRIGHT) for the scope of this
+notice. Existing licenses and third-party attribution remain unchanged; this
+notice does not grant additional permissions.
