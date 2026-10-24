@@ -7,15 +7,30 @@ It answers questions, gives advice, runs analysis, works through strategy, and l
 <!-- project-downloads:start -->
 ## APK and installer downloads
 
-| Package | Download | Source |
+Every available project package is indexed below, including older versions. Prefer the newest stable version for your platform and architecture. Debug APKs and prereleases are labeled; archives are not necessarily standalone installers.
+
+### Release downloads: all published versions
+
+| Version / source | Package | Download |
 | --- | --- | --- |
-| Windows installer | [Wolfman-Setup-Windows.exe](https://github.com/jwgmpi-wolff/wolfman/releases/download/wolfman-v0.0.0/Wolfman-Setup-Windows.exe) | wolfman-v0.0.0 |
-| Android APK (debug build) | [wolfman-android-debug.apk](https://github.com/jwgmpi-wolff/wolfman/raw/refs/heads/main/releases/wolfman-android-debug.apk) | repository package |
-| Windows installer | [wolfman-windows-arm64-setup.exe](https://github.com/jwgmpi-wolff/wolfman/raw/refs/heads/main/releases/wolfman-windows-arm64-setup.exe) | repository package |
+| wolfman-v0.0.0 | Windows installer | [Wolfman-Setup-Windows.exe](https://github.com/jwgmpi-wolff/wolfman/releases/download/wolfman-v0.0.0/Wolfman-Setup-Windows.exe) |
 
-Android may require approval to install apps from this download source. Debug APKs are labeled above. Windows executables that are not setup packages may require accompanying project files; follow the project-specific instructions below.
+### Repository-hosted packages: all available versions
 
-- [Download the complete source ZIP](https://github.com/jwgmpi-wolff/wolfman/archive/refs/heads/main.zip).
+| Version / source | Package | Download |
+| --- | --- | --- |
+| repository | Android APK (debug) | [releases/wolfman-android-debug.apk](https://github.com/jwgmpi-wolff/wolfman/raw/refs/heads/main/releases/wolfman-android-debug.apk) |
+| repository | Windows installer | [releases/wolfman-windows-arm64-setup.exe](https://github.com/jwgmpi-wolff/wolfman/raw/refs/heads/main/releases/wolfman-windows-arm64-setup.exe) |
+
+Git LFS links download the package itself, not a pointer file. Executables without a setup wrapper may require accompanying project files.
+
+### Setup scripts and source
+
+
+- [Download the complete source ZIP](https://github.com/jwgmpi-wolff/wolfman/archive/refs/heads/main.zip). Extract the complete checkout before running setup scripts unless the project instructions explicitly support standalone installation.
+- [Browse all releases and their assets](https://github.com/jwgmpi-wolff/wolfman/releases).
+
+Android may require approval to install apps from the download source. Follow the project-specific installation, signing, checksum, and prerequisite instructions elsewhere in this README.
 <!-- project-downloads:end -->
 
 ## The two rules
